@@ -169,7 +169,9 @@ class OmniinferAPI(BaseAPI):
                  controlnet_args):
 
         if self._token is None:
-            raise Exception("Please configure your omniinfer key in the `Cloud Inference` Tab")
+            raise Exception(
+                "Please configure your omniinfer key in the `Cloud Inference` Tab"
+            )
 
         # TODO: workaround
         if isinstance(sampler_name, int):
@@ -199,7 +201,8 @@ class OmniinferAPI(BaseAPI):
         headers = {
             "accept": "application/json",
             "content-type": "application/json",
-            'Accept-Encoding': 'gzip, deflate'
+            'Accept-Encoding': 'gzip, deflate',
+            "X-OmniInfer-Source": "source"
         }
 
         try:
@@ -224,7 +227,9 @@ class OmniinferAPI(BaseAPI):
                  controlnet_args):
 
         if self._token is None:
-            raise Exception("Please configure your omniinfer key in the `Cloud Inference` Tab")
+            raise Exception(
+                "Please configure your omniinfer key in the `Cloud Inference` Tab"
+            )
 
         if isinstance(sampler_name, int):
             sampler_name = sd_samplers[sampler_name]
@@ -249,7 +254,8 @@ class OmniinferAPI(BaseAPI):
         headers = {
             "accept": "application/json",
             "content-type": "application/json",
-            'Accept-Encoding': 'gzip, deflate'
+            'Accept-Encoding': 'gzip, deflate',
+            "X-OmniInfer-Source": "sd-webui"
         }
 
         res = requests.post("http://api.omniinfer.io/v2/img2img",
@@ -277,7 +283,8 @@ class OmniinferAPI(BaseAPI):
                                     params={
                                         "key": self._token,
                                         "task_id": task_id
-                                    })
+                                    },
+                                    headers={"X-OmniInfer-Source": "sd-webui"})
             task_res_json = task_res.json()
             progress = task_res_json["data"]["progress"]
             if progress == 1:
@@ -484,7 +491,8 @@ class OmniinferAPI(BaseAPI):
         url = "http://api.omniinfer.io/v2/models"
         headers = {
             "accept": "application/json",
-            'Accept-Encoding': 'gzip, deflate'
+            'Accept-Encoding': 'gzip, deflate',
+            "X-OmniInfer-Source": "sd-webui"
         }
 
         print("[cloud-inference] refreshing models...")

@@ -9,7 +9,7 @@
 
 1. Install sd-webui-cloud-inference extension
 1. 进入 `Extensions` 标签页，点击 `Install from URL` 按钮，输入 `https://github.com/omniinfer/sd-webui-cloud-inference` 点击 `Install` 按钮
-2. 从 [omniinfer.io](https://omniinfer.io) 获取 API Key
+2. 从 [omniinfer.io](https://omniinfer.readme.io/reference/try-api#find-your-key) 获取 API Key
     1. 在 sd-webui 中进入 `Cloud Inference` 标签页
     2. 粘贴 API Key 到 `API Key` 输入框
     3. 点击 `Test Connection` 按钮
