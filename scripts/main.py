@@ -227,6 +227,9 @@ class DataBinding:
 
     def __init__(self):
         self.enable_remote_inference = None
+        self.txt2img_enable_remote_inference = None
+        self.img2img_enable_remote_inference = None
+
         self.remote_inference_enabled = False
         self.txt2img_prompt = None
         self.txt2img_neg_prompt = None
@@ -244,21 +247,17 @@ class DataBinding:
         print("[cloud-inference] set_suggest_prompts_enabled", v)
         self.suggest_prompts_enabled = v
 
+    def set_remote_inference_enabled(self, v):
+        print("set",v)
+        return v
+
     def update_remote_inference_enabled(self, v):
         print("[cloud-infernece] set_remote_inference_enabled", v)
         self.remote_inference_enabled = v
 
         if v:
-            return "Generate (cloud)"
-        return "Generate"
-
-    def get_selected_model_loras(self):
-        ret = []
-        for ckpt in self.remote_checkpoints:
-            if ckpt.name == self.selected_checkpoint:
-                for lora_name in ckpt.loras:
-                    ret.append(lora_name)
-        return ret
+            return v,"Generate (cloud)"
+        return v,"Generate"
 
     def update_selected_model(self, name, prompt, neg_prompt):
         print("[cloud-inference] set_selected_model", name)
@@ -310,19 +309,65 @@ class CloudInferenceScript(scripts.Script):
     def show(self, is_img2img):
         return scripts.AlwaysVisible
 
+    def event_handler(value):
+        
+        v = "Generate"
+        if value:
+            v= "Generate (cloud)"
+        
+        print(v)
+        
+        _binding.img2img_generate.update(v)
+        _binding.txt2img_generate.update(v)
+    
     def ui(self, is_img2img):
         with gr.Accordion('Cloud Inference', open=True):
             with gr.Row():
-                _binding.enable_remote_inference = gr.Checkbox(
+                
+                if _binding.enable_remote_inference is None:
+                    _binding.enable_remote_inference = gr.Checkbox(
                     value=False,
                     label="Enable",
-                    elem_id="remote_inference_enabled")
-                _binding.enable_remote_inference.change(
-                    fn=lambda x: _binding.update_remote_inference_enabled(x),
-                    inputs=[_binding.enable_remote_inference],
-                    outputs=[_binding.txt2img_generate],
-                    # outputs=[_binding.txt2img_generate],
-                )
+                    elem_id="enable_remote_inference")
+
+                
+                if is_img2img:
+                    _binding.img2img_enable_remote_inference = gr.Checkbox(
+                        value=False,
+                        label="Enable",
+                        elem_id="img2img_enable_remote_inference")
+                    
+                    
+                    _binding.enable_remote_inference.change(
+                        fn=lambda x: _binding.update_remote_inference_enabled(x),
+                        inputs=[_binding.enable_remote_inference],
+                        outputs=[_binding.img2img_enable_remote_inference,_binding.img2img_generate]
+                    )
+                    
+                    _binding.img2img_enable_remote_inference.change(
+                        fn=lambda x: _binding.set_remote_inference_enabled(x),
+                        inputs=[_binding.img2img_enable_remote_inference],
+                        outputs=[_binding.enable_remote_inference]
+                    )
+
+                else:
+                    _binding.txt2img_enable_remote_inference = gr.Checkbox(
+                        value=False,
+                        label="Enable",
+                        elem_id="txt2img_enable_remote_inference")
+                    
+                    _binding.enable_remote_inference.change(
+                        fn=lambda x: _binding.update_remote_inference_enabled(x),
+                        inputs=[_binding.enable_remote_inference],
+                        outputs=[_binding.txt2img_enable_remote_inference,_binding.txt2img_generate]
+                    )
+                    
+                    _binding.txt2img_enable_remote_inference.change(
+                        fn=lambda x: _binding.set_remote_inference_enabled(x),
+                        inputs=[_binding.txt2img_enable_remote_inference],
+                        outputs=[_binding.enable_remote_inference]
+                    )
+
 
                 _binding.enable_suggest_prompts_checkbox = gr.Checkbox(
                     value=_binding.suggest_prompts_enabled,
@@ -339,7 +384,6 @@ class CloudInferenceScript(scripts.Script):
                     label="Service Provider",
                     choices=["Omniinfer"],
                     value="Omniinfer",
-                    scale=0.5,
                 )
                 _binding.cloud_api_dropdown.select(
                     fn=_binding.update_cloud_api,
@@ -362,9 +406,8 @@ class CloudInferenceScript(scripts.Script):
                 except Exception as e:
                     print(traceback.format_exc())
                     _checkpoint_choices = []
-                
-                top_n = min(len(_checkpoint_choices), 50)
-                _binding.selected_checkpoint = random.choice(_checkpoint_choices[:top_n]) if len(
+
+                _binding.selected_checkpoint = _checkpoint_choices[0] if len(
                     _checkpoint_choices) > 0 else None
                 print("[cloud-inference] default checkpoint {}".format(
                     _binding.selected_checkpoint))
@@ -372,7 +415,7 @@ class CloudInferenceScript(scripts.Script):
                 _binding.remote_checkpoint_dropdown = gr.Dropdown(
                     label="Checkpoint",
                     choices=_checkpoint_choices,
-                    value=lambda: _binding.selected_checkpoint,
+                    value=_binding.selected_checkpoint,
                     elem_id="remote_checkpoint_dropdown")
 
                 ui.create_refresh_button(
@@ -385,7 +428,7 @@ class CloudInferenceScript(scripts.Script):
                 with gr.Column():
                     # remote lora
                     _binding.remote_lora_checkbox_group = gr.CheckboxGroup(
-                        choices=_binding.get_selected_model_loras(),
+                        choices=[],
                         label="Lora",
                         elem_id="remote_lora_dropdown")
 
@@ -409,9 +452,16 @@ class CloudInferenceScript(scripts.Script):
                         ],
                         outputs=_binding.txt2img_prompt,
                     )
+                
+        enable_remote_inference = None    
+        if is_img2img:
+            enable_remote_inference = _binding.img2img_enable_remote_inference
+        else:
+            enable_remote_inference = _binding.txt2img_enable_remote_inference
+        
         return [
             _binding.remote_checkpoint_dropdown,
-            _binding.enable_remote_inference,
+            enable_remote_inference,
             _binding.remote_lora_checkbox_group,
         ]
 
@@ -421,7 +471,11 @@ if _binding is None:
     _binding = DataBinding()
 
 
+
 def on_after_component_callback(component, **_kwargs):
+    
+
+    
     if type(component) is gr.Button and getattr(component, 'elem_id',
                                                 None) == 'txt2img_generate':
         _binding.txt2img_generate = component
