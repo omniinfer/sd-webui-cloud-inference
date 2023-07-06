@@ -327,6 +327,7 @@ class CloudInferenceScript(scripts.Script):
                 if _binding.enable_remote_inference is None:
                     _binding.enable_remote_inference = gr.Checkbox(
                     value=False,
+                    visible=False,
                     label="Enable",
                     elem_id="enable_remote_inference")
 
