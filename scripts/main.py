@@ -219,12 +219,19 @@ def create_infotext(p,
         "Token merging ratio": None if token_merging_ratio == 0 else token_merging_ratio,
         "Token merging ratio hr": None if not enable_hr or token_merging_ratio_hr == 0 else token_merging_ratio_hr,
         "Init image hash": getattr(p, 'init_img_hash', None),
-        "RNG": opts.randn_source if getattr(opts, 'randn_source', None) != "GPU" else None,
-        "NGMS": None if p.s_min_uncond == 0 else p.s_min_uncond,
+        "RNG": None,
+        "NGMS": None,
         "Version": opts.add_version_to_infotext if  getattr(opts, 'add_version_to_infotext', None) else None,
         **p.extra_generation_params,
     }
 
+    # compatible with old version
+    if getattr(p, 's_min_ucond', None) is not None:
+        if p.s_min_uncond != 0:
+            generation_params["NGMS"] = p.s_min_uncond
+    if getattr(opts, 'randn_source', None) is not None and opts.randn_source != "GPU":
+        generation_params["RNG"] = opts.randn_source
+    
     generation_params_text = ", ".join([
         k if k == v else
         f'{k}: {processing.generation_parameters_copypaste.quote(v)}'
