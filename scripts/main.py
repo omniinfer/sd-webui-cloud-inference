@@ -7,7 +7,7 @@ from modules import images, script_callbacks, processing, ui
 from modules import images, script_callbacks
 from modules import processing
 from modules.processing import Processed, StableDiffusionProcessingImg2Img, StableDiffusionProcessingTxt2Img
-from modules.shared import opts, state
+from modules.shared import opts, state, prompt_styles
 from extension import api
 
 from inspect import getmembers, isfunction
@@ -78,8 +78,34 @@ class _Proxy(object):
         else:
             return self._fn(p)
 
-        p.setup_prompts()
+        # compatible with old version
+        if hasattr(p, 'set_prompts'):
+            p.setup_prompts()
+        else:
+            if type(p.prompt) == list:
+                p.all_prompts = p.prompt
+            else:
+                p.all_prompts = p.batch_size * p.n_iter * [p.prompt]
+            if type(p.negative_prompt) == list:
+                p.all_negative_prompts = p.negative_prompt
+            else:
+                p.all_negative_prompts = p.batch_size * p.n_iter * [
+                    p.negative_prompt
+                ]
+            p.all_prompts = [
+                prompt_styles.apply_styles_to_prompt(x, p.styles)
+                for x in p.all_prompts
+            ]
+            p.all_negative_prompts = [
+                prompt_styles.apply_negative_styles_to_prompt(x, p.styles)
+                for x in p.all_negative_prompts
+            ]
+
+            # TODO: img2img hr prompts
+
         p.all_seeds = [p.seed for _ in range(len(generated_images))]
+        p.seeds = p.all_seeds
+
 
         index_of_first_image = 0
         unwanted_grid_because_of_img_count = len(
@@ -93,11 +119,19 @@ class _Proxy(object):
                                    p.all_subseeds, comments, iteration,
                                    position_in_batch)
 
-        for image in generated_images:
+        for i, image in enumerate(generated_images):
             if opts.enable_pnginfo:
                 image.info["parameters"] = infotext()
                 infotexts.append(infotext())
-
+            if opts.samples_save and not p.do_not_save_samples:
+                images.save_image(image,
+                                  p.outpath_samples,
+                                  "",
+                                  p.all_seeds[i],
+                                  p.all_prompts[i],
+                                  opts.samples_format,
+                                  info=infotext(),
+                                  p=p)
         if (
                 opts.return_grid or opts.grid_save
         ) and not p.do_not_save_grid and not unwanted_grid_because_of_img_count:
@@ -248,7 +282,7 @@ class DataBinding:
         self.suggest_prompts_enabled = v
 
     def set_remote_inference_enabled(self, v):
-        print("set",v)
+        print("[cloud-inference] set_remote_inference_enabled", v)
         return v
 
     def update_remote_inference_enabled(self, v):
@@ -256,8 +290,8 @@ class DataBinding:
         self.remote_inference_enabled = v
 
         if v:
-            return v,"Generate (cloud)"
-        return v,"Generate"
+            return v, "Generate (cloud)"
+        return v, "Generate"
 
     def update_selected_model(self, name, prompt, neg_prompt):
         print("[cloud-inference] set_selected_model", name)
@@ -310,65 +344,66 @@ class CloudInferenceScript(scripts.Script):
         return scripts.AlwaysVisible
 
     def event_handler(value):
-        
+
         v = "Generate"
         if value:
-            v= "Generate (cloud)"
-        
+            v = "Generate (cloud)"
+
         print(v)
-        
+
         _binding.img2img_generate.update(v)
         _binding.txt2img_generate.update(v)
-    
+
     def ui(self, is_img2img):
         with gr.Accordion('Cloud Inference', open=True):
             with gr.Row():
-                
+
                 if _binding.enable_remote_inference is None:
                     _binding.enable_remote_inference = gr.Checkbox(
-                    value=False,
-                    visible=False,
-                    label="Enable",
-                    elem_id="enable_remote_inference")
+                        value=False,
+                        visible=False,
+                        label="Enable",
+                        elem_id="enable_remote_inference")
 
-                
                 if is_img2img:
                     _binding.img2img_enable_remote_inference = gr.Checkbox(
                         value=False,
                         label="Enable",
                         elem_id="img2img_enable_remote_inference")
-                    
-                    
+
                     _binding.enable_remote_inference.change(
-                        fn=lambda x: _binding.update_remote_inference_enabled(x),
+                        fn=lambda x: _binding.update_remote_inference_enabled(
+                            x),
                         inputs=[_binding.enable_remote_inference],
-                        outputs=[_binding.img2img_enable_remote_inference,_binding.img2img_generate]
-                    )
-                    
+                        outputs=[
+                            _binding.img2img_enable_remote_inference,
+                            _binding.img2img_generate
+                        ])
+
                     _binding.img2img_enable_remote_inference.change(
                         fn=lambda x: _binding.set_remote_inference_enabled(x),
                         inputs=[_binding.img2img_enable_remote_inference],
-                        outputs=[_binding.enable_remote_inference]
-                    )
+                        outputs=[_binding.enable_remote_inference])
 
                 else:
                     _binding.txt2img_enable_remote_inference = gr.Checkbox(
                         value=False,
                         label="Enable",
                         elem_id="txt2img_enable_remote_inference")
-                    
+
                     _binding.enable_remote_inference.change(
-                        fn=lambda x: _binding.update_remote_inference_enabled(x),
+                        fn=lambda x: _binding.update_remote_inference_enabled(
+                            x),
                         inputs=[_binding.enable_remote_inference],
-                        outputs=[_binding.txt2img_enable_remote_inference,_binding.txt2img_generate]
-                    )
-                    
+                        outputs=[
+                            _binding.txt2img_enable_remote_inference,
+                            _binding.txt2img_generate
+                        ])
+
                     _binding.txt2img_enable_remote_inference.change(
                         fn=lambda x: _binding.set_remote_inference_enabled(x),
                         inputs=[_binding.txt2img_enable_remote_inference],
-                        outputs=[_binding.enable_remote_inference]
-                    )
-
+                        outputs=[_binding.enable_remote_inference])
 
                 _binding.enable_suggest_prompts_checkbox = gr.Checkbox(
                     value=_binding.suggest_prompts_enabled,
@@ -453,13 +488,13 @@ class CloudInferenceScript(scripts.Script):
                         ],
                         outputs=_binding.txt2img_prompt,
                     )
-                
-        enable_remote_inference = None    
+
+        enable_remote_inference = None
         if is_img2img:
             enable_remote_inference = _binding.img2img_enable_remote_inference
         else:
             enable_remote_inference = _binding.txt2img_enable_remote_inference
-        
+
         return [
             _binding.remote_checkpoint_dropdown,
             enable_remote_inference,
@@ -472,11 +507,8 @@ if _binding is None:
     _binding = DataBinding()
 
 
-
 def on_after_component_callback(component, **_kwargs):
-    
 
-    
     if type(component) is gr.Button and getattr(component, 'elem_id',
                                                 None) == 'txt2img_generate':
         _binding.txt2img_generate = component
@@ -492,92 +524,6 @@ def on_after_component_callback(component, **_kwargs):
     if type(component) is gr.Textbox and getattr(component, 'elem_id',
                                                  None) == 'txt2img_neg_prompt':
         _binding.txt2img_neg_prompt = component
-
-    # is_txt2img_gallery = type(component) is gr.Gallery and getattr(
-    #     component, 'elem_id', None) == 'txt2img_gallery'
-    # is_txt2img_generation_info = type(component) is gr.Textbox and getattr(
-    #     component, 'elem_id', None) == 'generation_info_txt2img'
-    # is_txt2img_html_info = type(component) is gr.HTML and getattr(
-    #     component, 'elem_id', None) == 'html_info_txt2img'
-
-    # is_global_checkpoint_dropdown = type(component) == gr.Dropdown and getattr(
-    #     component, "elem_id", None) == "setting_sd_model_checkpoint"
-    # is_remote_checkpoint_list = type(component) == gr.Dropdown and getattr(
-    #     component, "elem_id", None) == "remote_checkpoint_list"
-    # is_txt2img_batch_size = type(component) == gr.Slider and getattr(
-    #     component, "elem_id", None) == "txt2img_batch_size"
-    # is_txt2img_batch_count = type(component) == gr.Slider and getattr(
-    #     component, "elem_id", None) == "txt2img_batch_count"
-    # is_txt2img_sampling = type(component) == gr.Dropdown and getattr(
-    #     component, "elem_id", None) == "txt2img_sampling"
-    # is_txt2img_steps = type(component) == gr.Slider and getattr(
-    #     component, "elem_id", None) == "txt2img_steps"
-    # is_txt2img_cfg_scale = type(component) == gr.Slider and getattr(
-    #     component, "elem_id", None) == "txt2img_cfg_scale"
-    # is_txt2img_seed = type(component) == gr.Number and getattr(
-    #     component, "elem_id", None) == "txt2img_seed"
-    # is_txt2img_height = type(component) == gr.Slider and getattr(
-    #     component, "elem_id", None) == "txt2img_height"
-    # is_txt2img_width = type(component) == gr.Slider and getattr(
-    #     component, "elem_id", None) == "txt2img_width"
-
-    # if is_txt2img_prompt:
-    #     _binding.txt2img_prompt = component
-    # if is_txt2img_neg_prompt:
-    #     _binding.txt2img_neg_prompt = component
-    # if is_txt2img_gallery:
-    #     _binding.txt2img_gallery = component
-    # if is_remote_checkpoint_list:
-    #     _binding.remote_models = component
-    # if is_txt2img_batch_size:
-    #     _binding.txt2img_batch_size = component
-    # if is_txt2img_batch_count:
-    #     _binding.txt2img_batch_count = component
-    # if is_txt2img_sampling:
-    #     _binding.txt2img_sampling = component
-    # if is_txt2img_steps:
-    #     _binding.txt2img_steps = component
-    # if is_txt2img_cfg_scale:
-    #     _binding.txt2img_cfg_scale = component
-    # if is_txt2img_seed:
-    #     _binding.txt2img_seed = component
-    # if is_txt2img_height:
-    #     _binding.txt2img_height = component
-    # if is_txt2img_width:
-    #     _binding.txt2img_width = component
-
-    # # print(component, _kwargs)
-    # # if txt2img_gallery is not None and not button_bound:
-    # if _binding.txt2img_gallery is not None \
-    #     and _binding.txt2img_prompt is not None \
-    #     and _binding.txt2img_neg_prompt is not None \
-    #     and _binding.remote_models is not None \
-    #     and _binding.txt2img_sampling is not None \
-    #     and _binding.txt2img_batch_size is not None \
-    #     and _binding.txt2img_batch_count is not None \
-    #     and _binding.txt2img_steps is not None \
-    #     and _binding.txt2img_cfg_scale is not None \
-    #     and _binding.txt2img_seed is not None \
-    #     and _binding.txt2img_height is not None \
-    #     and _binding.txt2img_width is not None \
-    #     and not _binding.button_bound:
-
-    #     # print(sd_prompt)
-    #     _binding.generate_button.click(
-    #         # fn=_api.get_instance().txt2img,
-    #         _download_wrapper(
-    #             api.get_instance().txt2img, "/stable-diffusion-webui/outputs/{}".format(
-    #                 datetime.datetime.now().strftime("%Y-%m-%d"))),
-    #         inputs=[
-    #             _binding.remote_models, _binding.txt2img_prompt,
-    #             _binding.txt2img_neg_prompt, _binding.txt2img_sampling,
-    #             _binding.txt2img_batch_size, _binding.txt2img_steps,
-    #             _binding.txt2img_batch_count, _binding.txt2img_cfg_scale,
-    #             _binding.txt2img_seed, _binding.txt2img_height,
-    #             _binding.txt2img_width
-    #         ],
-    #         outputs=[_binding.txt2img_gallery])
-    #     _binding.button_bound = True
 
 
 script_callbacks.on_after_component(on_after_component_callback)
