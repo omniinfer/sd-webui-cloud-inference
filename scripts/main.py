@@ -185,7 +185,7 @@ def create_infotext(p,
     # compatible with old version
     token_merging_ratio = None
     token_merging_ratio_hr = None
-    if getattr(p, 'get_token_merging_ratio'):
+    if hasattr(p, 'get_token_merging_ratio'):
         token_merging_ratio = p.get_token_merging_ratio()
         token_merging_ratio_hr = p.get_token_merging_ratio(for_hr=True)
 
