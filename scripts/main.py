@@ -106,7 +106,6 @@ class _Proxy(object):
         p.all_seeds = [p.seed for _ in range(len(generated_images))]
         p.seeds = p.all_seeds
 
-
         index_of_first_image = 0
         unwanted_grid_because_of_img_count = len(
             generated_images) < 2 and opts.grid_only_if_multiple
@@ -240,9 +239,12 @@ def create_infotext(p,
         "NGMS":
         None if p.s_min_uncond == 0 else p.s_min_uncond,
         **p.extra_generation_params,
-        "Version":
-        processing.program_version() if opts.add_version_to_infotext else None,
     }
+
+
+    if getattr(opts, 'add_version_to_infotext', None):
+        if opts.add_version_to_infotext:
+            generation_params['Version'] = processing.program_version()
 
     generation_params_text = ", ".join([
         k if k == v else
