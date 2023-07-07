@@ -275,6 +275,8 @@ class OmniinferAPI(BaseAPI):
         STATUS_CODE_TIMEOUT = 4
 
         attempts = 300
+
+        global_progress = 0  # queue(0-20), generating(20-90), downloading(90-100)
         while attempts > 0:
             if state.skipped or state.interrupted:
                 raise Exception("Interrupted")
@@ -285,15 +287,17 @@ class OmniinferAPI(BaseAPI):
                                         "task_id": task_id
                                     },
                                     headers={"X-OmniInfer-Source": "sd-webui"})
+
             task_res_json = task_res.json()
-            progress = task_res_json["data"]["progress"]
-            if progress == 1:
-                progress = 0.9  # reverse 10% progress bar for download
-            state.sampling_step = state.sampling_steps * state.job_count * progress
+            generate_progress = task_res_json["data"]["progress"]
 
             status_code = task_res_json["data"]["status"]
 
-            if status_code == STATUS_CODE_SUCCESS:
+            if status_code == STATUS_CODE_PROGRESSING:
+                global_progress += 0.7 * generate_progress
+            if status_code == STATUS_CODE_PENDING and global_progress < 0.2:
+                global_progress += 0.05
+            elif status_code == STATUS_CODE_SUCCESS:
                 return task_res_json["data"]["imgs"]
             elif status_code == STATUS_CODE_TIMEOUT:
                 raise Exception("failed to generate image({}): timeout",
@@ -301,6 +305,9 @@ class OmniinferAPI(BaseAPI):
             elif status_code == STATUS_CODE_FAILED:
                 raise Exception("failed to generate image({}): {}",
                                 task_res_json["data"]["failed_reason"])
+
+            state.sampling_step = state.sampling_steps * state.job_count * global_progress
+
             attempts -= 1
             time.sleep(0.5)
 
