@@ -122,12 +122,20 @@ class _Proxy(object):
             if opts.enable_pnginfo:
                 image.info["parameters"] = infotext()
                 infotexts.append(infotext())
+
+            seed = None
+            if len(p.all_seeds) > i:
+                seed = p.all_seeds[i]
+            prompt = None
+            if len(p.all_prompts) > i:
+                prompt = p.all_seeds[i]
+
             if opts.samples_save and not p.do_not_save_samples:
                 images.save_image(image,
                                   p.outpath_samples,
                                   "",
-                                  p.all_seeds[i],
-                                  p.all_prompts[i],
+                                  seed,
+                                  prompt,
                                   opts.samples_format,
                                   info=infotext(),
                                   p=p)
@@ -194,58 +202,36 @@ def create_infotext(p,
             p)
 
     generation_params = {
-        "Steps":
-        p.steps,
-        "Sampler":
-        p.sampler_name,
-        "CFG scale":
-        p.cfg_scale,
-        "Image CFG scale":
-        getattr(p, 'image_cfg_scale', None),
-        "Seed":
-        all_seeds[index],
-        "Face restoration":
-        (opts.face_restoration_model if p.restore_faces else None),
-        "Size":
-        f"{p.width}x{p.height}",
-        "Model":
-        (None if not opts.add_model_name_to_info or not p._remote_model_name
-         else p._remote_model_name.replace(',', '').replace(':', '')),
-        "Variation seed":
-        (None if p.subseed_strength == 0 else all_subseeds[index]),
-        "Variation seed strength":
-        (None if p.subseed_strength == 0 else p.subseed_strength),
-        "Seed resize from":
-        (None if p.seed_resize_from_w == 0 or p.seed_resize_from_h == 0 else
-         f"{p.seed_resize_from_w}x{p.seed_resize_from_h}"),
-        "Denoising strength":
-        getattr(p, 'denoising_strength', None),
-        "Conditional mask weight":
-        getattr(p, "inpainting_mask_weight", opts.inpainting_mask_weight)
-        if p.is_using_inpainting_conditioning else None,
-        "Clip skip":
-        None if clip_skip <= 1 else clip_skip,
-        "ENSD":
-        opts.eta_noise_seed_delta if uses_ensd else None,
-        "Token merging ratio":
-        None if token_merging_ratio == 0 else token_merging_ratio,
-        "Token merging ratio hr":
-        None if not enable_hr or token_merging_ratio_hr == 0 else
-        token_merging_ratio_hr,
-        "Init image hash":
-        getattr(p, 'init_img_hash', None),
-        "RNG":
-        opts.randn_source if opts.randn_source != "GPU" else None,
-        "NGMS":
-        None if p.s_min_uncond == 0 else p.s_min_uncond,
+        "Steps": p.steps,
+        "Sampler": p.sampler_name,
+        "CFG scale": p.cfg_scale,
+        "Image CFG scale": getattr(p, 'image_cfg_scale', None),
+        "Seed": all_seeds[index],
+        "Face restoration": (opts.face_restoration_model if p.restore_faces else None),
+        "Size": f"{p.width}x{p.height}", 
+        "Model": (None if not opts.add_model_name_to_info or not p._remote_model_name else p._remote_model_name.replace(',', '').replace(':', '')),
+        "Variation seed": (None if p.subseed_strength == 0 else all_subseeds[index]),
+        "Variation seed strength": (None if p.subseed_strength == 0 else p.subseed_strength),
+        "Seed resize from": (None if p.seed_resize_from_w == 0 or p.seed_resize_from_h == 0 else f"{p.seed_resize_from_w}x{p.seed_resize_from_h}"),
+        "Denoising strength": getattr(p, 'denoising_strength', None),
+        "Conditional mask weight": getattr(p, "inpainting_mask_weight", opts.inpainting_mask_weight) if p.is_using_inpainting_conditioning else None, "Clip skip": None if clip_skip <= 1 else clip_skip,
+        "ENSD": getattr(opts, 'eta_noise_seed_delta', None) if uses_ensd else None,
+        "Token merging ratio": None if token_merging_ratio == 0 else token_merging_ratio,
+        "Token merging ratio hr": None if not enable_hr or token_merging_ratio_hr == 0 else token_merging_ratio_hr,
+        "Init image hash": getattr(p, 'init_img_hash', None),
+        "RNG": None,
+        "NGMS": None,
+        "Version": opts.add_version_to_infotext if  getattr(opts, 'add_version_to_infotext', None) else None,
         **p.extra_generation_params,
     }
 
-
-    if getattr(opts, 'add_version_to_infotext', None):
-        if opts.add_version_to_infotext:
-            generation_params['Version'] = processing.program_version()
-
+    # compatible with old version
+    if getattr(p, 's_min_ucond', None) is not None:
+        if p.s_min_uncond != 0:
+            generation_params["NGMS"] = p.s_min_uncond
+    if getattr(opts, 'randn_source', None) is not None and opts.randn_source != "GPU":
+        generation_params["RNG"] = opts.randn_source
+    
     generation_params_text = ", ".join([
         k if k == v else
         f'{k}: {processing.generation_parameters_copypaste.quote(v)}'
@@ -341,6 +327,14 @@ class DataBinding:
         print("[cloud-inference] set_cloud_api", v)
         self.cloud_api = v
 
+    def get_selected_model_loras(self):
+        ret = []
+        for ckpt in self.remote_checkpoints:
+            if ckpt.name == self.selected_checkpoint:
+                for lora_name in ckpt.loras:
+                    ret.append(lora_name)
+        return ret
+
 
 class CloudInferenceScript(scripts.Script):
     # Extension title in menu UI
@@ -374,7 +368,7 @@ class CloudInferenceScript(scripts.Script):
 
                 if is_img2img:
                     _binding.img2img_enable_remote_inference = gr.Checkbox(
-                        value=False,
+                        value=lambda: _binding.remote_inference_enabled,
                         label="Enable",
                         elem_id="img2img_enable_remote_inference")
 
@@ -394,7 +388,7 @@ class CloudInferenceScript(scripts.Script):
 
                 else:
                     _binding.txt2img_enable_remote_inference = gr.Checkbox(
-                        value=False,
+                        value=lambda: _binding.remote_inference_enabled,
                         label="Enable",
                         elem_id="txt2img_enable_remote_inference")
 
@@ -450,10 +444,16 @@ class CloudInferenceScript(scripts.Script):
                     print(traceback.format_exc())
                     _checkpoint_choices = []
 
-                _binding.selected_checkpoint = _checkpoint_choices[0] if len(
-                    _checkpoint_choices) > 0 else None
-                print("[cloud-inference] default checkpoint {}".format(
-                    _binding.selected_checkpoint))
+                def select_top_n():
+                    top_n = min(len(_checkpoint_choices), 50)
+                    _binding.selected_checkpoint = random.choice(
+                        _checkpoint_choices[:top_n]) if len(
+                            _checkpoint_choices) > 0 else None
+
+                    print("[cloud-inference] default checkpoint {}".format(
+                        _binding.selected_checkpoint))
+
+                select_top_n()  # TODO: random top n after refresh page
 
                 _binding.remote_checkpoint_dropdown = gr.Dropdown(
                     label="Checkpoint",
@@ -471,7 +471,7 @@ class CloudInferenceScript(scripts.Script):
                 with gr.Column():
                     # remote lora
                     _binding.remote_lora_checkbox_group = gr.CheckboxGroup(
-                        choices=[],
+                        _binding.get_selected_model_loras(),
                         label="Lora",
                         elem_id="remote_lora_dropdown")
 
