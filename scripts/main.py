@@ -122,7 +122,7 @@ class _Proxy(object):
             if opts.enable_pnginfo:
                 image.info["parameters"] = infotext()
                 infotexts.append(infotext())
-            
+
             seed = None
             if len(p.all_seeds) > i:
                 seed = p.all_seeds[i]
