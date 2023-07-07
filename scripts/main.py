@@ -79,7 +79,7 @@ class _Proxy(object):
             return self._fn(p)
 
         # compatible with old version
-        if hasattr(p, 'set_prompts'):
+        if hasattr(p, 'setup_prompts'):
             p.setup_prompts()
         else:
             if type(p.prompt) == list:
