@@ -122,7 +122,7 @@ class _Proxy(object):
             if opts.enable_pnginfo:
                 image.info["parameters"] = infotext()
                 infotexts.append(infotext())
-
+            
             seed = None
             if len(p.all_seeds) > i:
                 seed = p.all_seeds[i]
@@ -221,7 +221,7 @@ def create_infotext(p,
         "Init image hash": getattr(p, 'init_img_hash', None),
         "RNG": None,
         "NGMS": None,
-        "Version": opts.add_version_to_infotext if  getattr(opts, 'add_version_to_infotext', None) else None,
+        "Version": None,
         **p.extra_generation_params,
     }
 
@@ -232,6 +232,10 @@ def create_infotext(p,
     if getattr(opts, 'randn_source', None) is not None and opts.randn_source != "GPU":
         generation_params["RNG"] = opts.randn_source
     
+    if getattr(opts, 'add_version_to_infotext', None):
+        if opts.add_version_to_infotext:
+            generation_params['Version'] = processing.program_version()
+
     generation_params_text = ", ".join([
         k if k == v else
         f'{k}: {processing.generation_parameters_copypaste.quote(v)}'
