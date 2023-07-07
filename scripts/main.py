@@ -181,8 +181,13 @@ def create_infotext(p,
 
     clip_skip = getattr(p, 'clip_skip', opts.CLIP_stop_at_last_layers)
     enable_hr = getattr(p, 'enable_hr', False)
-    token_merging_ratio = p.get_token_merging_ratio()
-    token_merging_ratio_hr = p.get_token_merging_ratio(for_hr=True)
+
+    # compatible with old version
+    token_merging_ratio = None
+    token_merging_ratio_hr = None
+    if getattr(p, 'get_token_merging_ratio'):
+        token_merging_ratio = p.get_token_merging_ratio()
+        token_merging_ratio_hr = p.get_token_merging_ratio(for_hr=True)
 
     uses_ensd = opts.eta_noise_seed_delta != 0
     if uses_ensd:
