@@ -122,12 +122,20 @@ class _Proxy(object):
             if opts.enable_pnginfo:
                 image.info["parameters"] = infotext()
                 infotexts.append(infotext())
+            
+            seed = None
+            if len(p.all_seeds) > i:
+                seed = p.all_seeds[i]
+            prompt = None
+            if len(p.all_prompts) > i:
+                prompt = p.all_seeds[i]
+
             if opts.samples_save and not p.do_not_save_samples:
                 images.save_image(image,
                                   p.outpath_samples,
                                   "",
-                                  p.all_seeds[i],
-                                  p.all_prompts[i],
+                                  seed,
+                                  prompt,
                                   opts.samples_format,
                                   info=infotext(),
                                   p=p)
@@ -241,7 +249,6 @@ def create_infotext(p,
         **p.extra_generation_params,
     }
 
-
     if getattr(opts, 'add_version_to_infotext', None):
         if opts.add_version_to_infotext:
             generation_params['Version'] = processing.program_version()
@@ -341,6 +348,14 @@ class DataBinding:
         print("[cloud-inference] set_cloud_api", v)
         self.cloud_api = v
 
+    def get_selected_model_loras(self):
+        ret = []
+        for ckpt in self.remote_checkpoints:
+            if ckpt.name == self.selected_checkpoint:
+                for lora_name in ckpt.loras:
+                    ret.append(lora_name)
+        return ret
+
 
 class CloudInferenceScript(scripts.Script):
     # Extension title in menu UI
@@ -374,7 +389,7 @@ class CloudInferenceScript(scripts.Script):
 
                 if is_img2img:
                     _binding.img2img_enable_remote_inference = gr.Checkbox(
-                        value=False,
+                        value=lambda: _binding.remote_inference_enabled,
                         label="Enable",
                         elem_id="img2img_enable_remote_inference")
 
@@ -394,7 +409,7 @@ class CloudInferenceScript(scripts.Script):
 
                 else:
                     _binding.txt2img_enable_remote_inference = gr.Checkbox(
-                        value=False,
+                        value=lambda: _binding.remote_inference_enabled,
                         label="Enable",
                         elem_id="txt2img_enable_remote_inference")
 
@@ -450,10 +465,16 @@ class CloudInferenceScript(scripts.Script):
                     print(traceback.format_exc())
                     _checkpoint_choices = []
 
-                _binding.selected_checkpoint = _checkpoint_choices[0] if len(
-                    _checkpoint_choices) > 0 else None
-                print("[cloud-inference] default checkpoint {}".format(
-                    _binding.selected_checkpoint))
+                def select_top_n():
+                    top_n = min(len(_checkpoint_choices), 50)
+                    _binding.selected_checkpoint = random.choice(
+                        _checkpoint_choices[:top_n]) if len(
+                            _checkpoint_choices) > 0 else None
+
+                    print("[cloud-inference] default checkpoint {}".format(
+                        _binding.selected_checkpoint))
+
+                select_top_n()  # TODO: random top n after refresh page
 
                 _binding.remote_checkpoint_dropdown = gr.Dropdown(
                     label="Checkpoint",
@@ -471,7 +492,7 @@ class CloudInferenceScript(scripts.Script):
                 with gr.Column():
                     # remote lora
                     _binding.remote_lora_checkbox_group = gr.CheckboxGroup(
-                        choices=[],
+                        _binding.get_selected_model_loras(),
                         label="Lora",
                         elem_id="remote_lora_dropdown")
 
