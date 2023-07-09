@@ -452,16 +452,14 @@ class OmniinferAPI(BaseAPI):
                     if c.enabled == False:
                         continue
 
-                    print(c.input_mode)
-
                     controlnet_arg = {}
                     controlnet_arg['weight'] = c.weight
-                    controlnet_arg['model'] = "control_v11f1e_sd15_tile"
+                    controlnet_arg['model'] = "control_v11f1e_sd15_tile" # TODO
                     controlnet_arg['module'] = c.module
 
                     if c.control_mode == "Balanced":
                         controlnet_arg['control_mode'] = 1
-                    elif c.control_mode == "My prompt is more important,":
+                    elif c.control_mode == "My prompt is more important":
                         controlnet_arg['control_mode'] = 2
                     elif c.control_mode == "ControlNet is more important":
                         controlnet_arg['control_mode'] = 3
@@ -469,7 +467,6 @@ class OmniinferAPI(BaseAPI):
                         return
 
                     if getattr(c.input_mode, 'value', '') == "simple":
-
                         base64_str = ""
                         if script_args[0].image is not None:
                             image = Image.fromarray(
