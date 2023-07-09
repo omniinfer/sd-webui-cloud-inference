@@ -69,7 +69,7 @@ class _Proxy(object):
 
         state.textinfo = "remote inferencing ({})".format(
             api.get_instance().__class__.__name__)
-        p._remote_model_name = _binding.selected_checkpoint
+        p._remote_model_name = _binding.selected_checkpoint.name
 
         if isinstance(p, StableDiffusionProcessingTxt2Img):
             generated_images = api.get_instance().txt2img(p)
@@ -221,7 +221,7 @@ def create_infotext(p,
         "Init image hash": getattr(p, 'init_img_hash', None),
         "RNG": None,
         "NGMS": None,
-        "Version": opts.add_version_to_infotext if  getattr(opts, 'add_version_to_infotext', None) else None,
+        "Version": None,
         **p.extra_generation_params,
     }
 
@@ -232,6 +232,10 @@ def create_infotext(p,
     if getattr(opts, 'randn_source', None) is not None and opts.randn_source != "GPU":
         generation_params["RNG"] = opts.randn_source
     
+    if getattr(opts, 'add_version_to_infotext', None):
+        if opts.add_version_to_infotext:
+            generation_params['Version'] = processing.program_version()
+
     generation_params_text = ", ".join([
         k if k == v else
         f'{k}: {processing.generation_parameters_copypaste.quote(v)}'
@@ -265,10 +269,12 @@ class DataBinding:
         self.remote_checkpoints = None
         self.remote_checkpoint_dropdown = None
         self.remote_lora_checkbox_group = None
-        self.selected_checkpoint = None
+        self.selected_checkpoint = None # checkpoint object
         self.cloud_api_dropdown = None
         self.update_suggest_prompts_checkbox = None
         self.suggest_prompts_enabled = True
+
+        self.initialized = False
 
     def update_suggest_prompts_enabled(self, v):
         print("[cloud-inference] set_suggest_prompts_enabled", v)
@@ -286,9 +292,10 @@ class DataBinding:
             return v, "Generate (cloud)"
         return v, "Generate"
 
-    def update_selected_model(self, name, prompt, neg_prompt):
+    def update_selected_model(self, name_index, prompt, neg_prompt):
+        self.selected_checkpoint = self.remote_checkpoints[name_index]
+        name = self.remote_checkpoints[name_index].name
         print("[cloud-inference] set_selected_model", name)
-        self.selected_checkpoint = name
 
         prompt = prompt
         neg_prompt = neg_prompt
@@ -300,9 +307,9 @@ class DataBinding:
                         prompt = ckpt.example.prompts
                     if ckpt.example.neg_prompt is not None and self.suggest_prompts_enabled:
                         neg_prompt = ckpt.example.neg_prompt
-                return gr.update(choices=ckpt.loras), gr.update(
+                return gr.update(choices=ckpt.loras, value=[]), gr.update(
                     value=prompt), gr.update(value=neg_prompt)
-        return gr.update(choices=[]), gr.update(value=prompt), gr.update(
+        return gr.update(choices=[], value=[]), gr.update(value=prompt), gr.update(
             value=neg_prompt)
 
     def update_selected_lora(self, lora_names, prompt):
@@ -330,7 +337,7 @@ class DataBinding:
     def get_selected_model_loras(self):
         ret = []
         for ckpt in self.remote_checkpoints:
-            if ckpt.name == self.selected_checkpoint:
+            if ckpt.name == self.selected_checkpoint.name:
                 for lora_name in ckpt.loras:
                     ret.append(lora_name)
         return ret
@@ -345,12 +352,9 @@ class CloudInferenceScript(scripts.Script):
         return scripts.AlwaysVisible
 
     def event_handler(value):
-
         v = "Generate"
         if value:
             v = "Generate (cloud)"
-
-        print(v)
 
         _binding.img2img_generate.update(v)
         _binding.txt2img_generate.update(v)
@@ -428,45 +432,41 @@ class CloudInferenceScript(scripts.Script):
                 )
 
                 # remote checkpoint
-                try:
-                    _binding.remote_checkpoints = api.get_instance(
-                    ).list_models()
-                    if _binding.remote_checkpoints is None or len(
-                            _binding.remote_checkpoints) == 0:
-                        api.get_instance().refresh_models()
-                        _binding.remote_checkpoints = api.get_instance(
-                        ).list_models()
+                if not _binding.initialized:
+                    try:
+                        _binding.remote_checkpoints = api.get_instance().list_models()
+                        if _binding.remote_checkpoints is None or len(
+                                _binding.remote_checkpoints) == 0:
+                            api.get_instance().refresh_models()
+                            _binding.remote_checkpoints = api.get_instance().list_models()
 
-                    _checkpoint_choices = [
-                        m.name for m in _binding.remote_checkpoints
-                    ]
-                except Exception as e:
-                    print(traceback.format_exc())
-                    _checkpoint_choices = []
+                        _checkpoint_choices = [m.display_name for m in _binding.remote_checkpoints]
+                    except Exception as e:
+                        print(traceback.format_exc())
+                        _checkpoint_choices = []
 
-                def select_top_n():
-                    top_n = min(len(_checkpoint_choices), 50)
-                    _binding.selected_checkpoint = random.choice(
-                        _checkpoint_choices[:top_n]) if len(
-                            _checkpoint_choices) > 0 else None
+                    def select_top_n():
+                        top_n = min(len(_binding.remote_checkpoints), 50)
+                        _binding.selected_checkpoint = random.choice(_binding.remote_checkpoints[:top_n]) if len(_binding.remote_checkpoints) > 0 else None
 
-                    print("[cloud-inference] default checkpoint {}".format(
-                        _binding.selected_checkpoint))
+                        print("[cloud-inference] default checkpoint {}".format(_binding.selected_checkpoint.name))
 
-                select_top_n()  # TODO: random top n after refresh page
+                    select_top_n()  # TODO: random top n after refresh page
 
-                _binding.remote_checkpoint_dropdown = gr.Dropdown(
-                    label="Checkpoint",
-                    choices=_checkpoint_choices,
-                    value=_binding.selected_checkpoint,
-                    elem_id="remote_checkpoint_dropdown")
+                    _binding.remote_checkpoint_dropdown = gr.Dropdown(
+                        label="Checkpoint",
+                        choices=_checkpoint_choices,
+                        value=_binding.selected_checkpoint.display_name,
+                        type="index",
+                        elem_id="remote_checkpoint_dropdown")
 
-                ui.create_refresh_button(
-                    _binding.remote_checkpoint_dropdown,
-                    api.get_instance().refresh_models, lambda: {
-                        "choices":
-                        [_.name for _ in api.get_instance().list_models()]
-                    }, "Refresh")
+                    _binding.initialized = True
+
+                def _refresh():
+                    _binding.remote_checkpoints = api.get_instance().list_models()
+                    return {"choices":[_.display_name for _ in _binding.remote_checkpoints]}
+
+                ui.create_refresh_button(_binding.remote_checkpoint_dropdown, api.get_instance().refresh_models, _refresh, "Refresh")
 
                 with gr.Column():
                     # remote lora

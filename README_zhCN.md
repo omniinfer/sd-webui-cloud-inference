@@ -1,24 +1,23 @@
 # Stable Diffusion Web UI Cloud Inference
 
-##  收益:
+[![](https://dcbadge.vercel.app/api/server/kJCEK9zf)](https://discord.gg/kJCEK9zf)
+
+## 这个插件能做什么？
+该插件能够让你通过云端更快的生成图片，而不需要购买昂贵的 GPU 资源，并且能够和  AUTOMAIC1111 UI 无缝兼容
+
+## 收益:
 1. **不需要昂贵的 GPU**
 2. **不需要改变工作流**， 基本兼容 sd-webui 的使用和脚本，例如 X/Y/Z Plot、Prompt from file 等
 3. **支持 1000+ Checkpoint 模型**
 
-##  快速开始
+## 相关文档
 
-1. Install sd-webui-cloud-inference extension
-1. 进入 `Extensions` 标签页，点击 `Install from URL` 按钮，输入 `https://github.com/omniinfer/sd-webui-cloud-inference` 点击 `Install` 按钮
-2. 从 [omniinfer.io](https://omniinfer.readme.io/reference/try-api#find-your-key) 获取 API Key
-    1. 在 sd-webui 中进入 `Cloud Inference` 标签页
-    2. 粘贴 API Key 到 `API Key` 输入框
-    3. 点击 `Test Connection` 按钮
-       * ✅ 如果出现 `Connection Success` 则说明连接成功
-       * ❌ 如果出现 `Connection Failed` 则说明连接失败，请检查 API Key 是否正确
-3. 进入 `txt2img` 标签页， 勾选 ✅  `Cloud Inference` 中的 `Enable` 复选框
-   * ✅ 这时候右上角的 `Geneate` 会变为 `Genearte (cloud)`，说明已经启用了云推理
-   * 云端可用的模型列表会显示在下拉框中
-4. 点击 `Genearte (cloud)` 按钮，等待结果
+* [快速开始 - Stable Diffusion WebUI Cloud Inference Tutorial](https://github.com/omniinfer/sd-webui-cloud-inference/wiki/Stable-Diffusion-WebUI-Cloud-Inference-Tutorial)
+
+
+# 这个插件是如何工作的？
+
+![how it works](./docs/how-it-works.png)
 
 
 ##  兼容性和限制

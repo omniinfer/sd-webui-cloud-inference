@@ -59,13 +59,26 @@ class Checkpoint(object):
                  name: str,
                  rating: int = None,
                  loras: list[str] = None,
+                 tags: list[str] = None,
                  example: CheckpointExample = None):
         self.name = name
         self.rating = rating
         self.loras = loras
+
         if self.loras is None:
             self.loras = []
+
+        self.tags = []
+        if tags is not None:
+            self.tags = tags
         self.example = example
+
+    @property
+    def display_name(self):
+        n = ""
+        if self.tags is not None and len(self.tags) != 0:
+            n += "[{}] ".format(self.tags[0])
+        return n + self.name
 
     def to_json(self):
         d = {}
@@ -88,7 +101,7 @@ class OmniinferAPI(BaseAPI):
         if self._token is not None:
             self._token = token
         self._models = None
-        # self._txt2img_timeout = 30
+        self._session = requests.Session()
 
     @classmethod
     def load_from_config(cls):
@@ -206,10 +219,10 @@ class OmniinferAPI(BaseAPI):
         }
 
         try:
-            res = requests.post("http://api.omniinfer.io/v2/txt2img",
-                                json=payload,
-                                headers=headers,
-                                params={"key": self._token})
+            res = self._session.post("http://api.omniinfer.io/v2/txt2img",
+                                     json=payload,
+                                     headers=headers,
+                                     params={"key": self._token})
         except Exception as exp:
             raise Exception("Request failed: {}, res: {}".format(
                 exp, res.text if res is not None else ""))
@@ -281,12 +294,14 @@ class OmniinferAPI(BaseAPI):
             if state.skipped or state.interrupted:
                 raise Exception("Interrupted")
 
-            task_res = requests.get("http://api.omniinfer.io/v2/progress",
-                                    params={
-                                        "key": self._token,
-                                        "task_id": task_id
-                                    },
-                                    headers={"X-OmniInfer-Source": "sd-webui"})
+            task_res = self._session.get(
+                "http://api.omniinfer.io/v2/progress",
+                params={
+                    "key": self._token,
+                    "task_id": task_id,
+                    'Accept-Encoding': 'gzip, deflate',
+                },
+                headers={"X-OmniInfer-Source": "sd-webui"})
 
             task_res_json = task_res.json()
             generate_progress = task_res_json["data"]["progress"]
@@ -294,7 +309,9 @@ class OmniinferAPI(BaseAPI):
             status_code = task_res_json["data"]["status"]
 
             if status_code == STATUS_CODE_PROGRESSING:
-                global_progress += 0.7 * generate_progress
+                global_progress += (0.7 * generate_progress)
+                if global_progress >= 0.9:
+                    global_progress = 0.9  # reverse download time
             if status_code == STATUS_CODE_PENDING and global_progress < 0.2:
                 global_progress += 0.05
             elif status_code == STATUS_CODE_SUCCESS:
@@ -306,7 +323,8 @@ class OmniinferAPI(BaseAPI):
                 raise Exception("failed to generate image({}): {}",
                                 task_res_json["data"]["failed_reason"])
 
-            state.sampling_step = state.sampling_steps * state.job_count * global_progress
+            state.sampling_step = int(state.sampling_steps * state.job_count *
+                                      global_progress)
 
             attempts -= 1
             time.sleep(0.5)
@@ -486,10 +504,6 @@ class OmniinferAPI(BaseAPI):
         return controlnet_batchs
 
     def list_models(self):
-        if self._models != None:
-            return self._models
-
-    def list_models(self):
         if self._models is None or len(self._models) == 0:
             self._models = self.refresh_models()
         return sorted(self._models, key=lambda x: x.rating, reverse=True)
@@ -504,6 +518,7 @@ class OmniinferAPI(BaseAPI):
 
         print("[cloud-inference] refreshing models...")
         results = []
+
         res = requests.get(url, headers=headers)
         if res.status_code >= 400:
             return []
@@ -514,6 +529,7 @@ class OmniinferAPI(BaseAPI):
                 ckpt = Checkpoint(
                     name=item["sd_name"],
                     rating=item.get("civitai_download_count", 0),
+                    tags=item["civitai_tags"].split(",") if item.get("civitai_tags", None) is not None else []
                 )
 
                 if len(item.get(
@@ -557,7 +573,8 @@ def retrieve_images(img_urls) -> list[Image.Image]:
     applied = []
     for img_url in img_urls:
         applied.append(pool.apply_async(_download, (img_url, )))
-    return [r.get() for r in applied]
+    ret = [r.get() for r in applied]
+    return ret
 
 
 _instance = None
