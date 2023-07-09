@@ -8,7 +8,7 @@
 ## 收益:
 1. **不需要昂贵的 GPU**
 2. **不需要改变工作流**， 基本兼容 sd-webui 的使用和脚本，例如 X/Y/Z Plot、Prompt from file 等
-3. **支持 1000+ Checkpoint 模型**
+3. **支持 10000+ Checkpoint 模型**
 
 ## 相关文档
 
@@ -24,10 +24,10 @@
 
 | 功能                       | 兼容性 | 限制                                                                          |
 | -------------------------- | ------ | ----------------------------------------------------------------------------- |
-| txt2img                    | ✅✅✅    | 🚫 Hires.fix、Tiling、restore face                                             |
-| txt2img_controlnet         | ✅✅✅    | 🚫 Hires.fix、Tiling、restore face、Ending Control Step、Starting Control Step |
-| img2img                    | ✅✅✅    |                                                                               |
-| img2img_controlnet         | ✅✅✅    | 🚫 Hires.fix、Tiling、restore face、Ending Control Step、Starting Control Step |
-| scripts - X/Y/Z plot       | ✅✅✅✅✅  | 🚫 Tiling、restore face                                                        |
+| txt2img                    | ✅✅✅    | 🚫 Hires.fix, Tiling, restore face                                             |
+| txt2img_controlnet         | ✅✅✅    | 🚫 Hires.fix, Tiling, restore face, Ending Control Step, Starting Control Step |
+| img2img                    | ✅✅✅    | 🚫 Tiling, restore face                                                        |
+| img2img_controlnet         | ✅✅✅    | 🚫 Hires.fix, Tiling, restore face, Ending Control Step, Starting Control Step |
+| scripts - X/Y/Z plot       | ✅✅✅✅✅  | 🚫 Checkpoint name                                                             |
 | scripts - Prompt matrix    | ✅✅✅✅✅  |                                                                               |
 | scripts - Prompt from file | ✅✅✅✅✅  |                                                                               |
