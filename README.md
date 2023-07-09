@@ -1,5 +1,8 @@
 # Stable Diffusion Web UI Cloud Inference
 
+
+[![](https://dcbadge.vercel.app/api/server/kJCEK9zf)](https://discord.gg/kJCEK9zf)
+
 ## What capabilities does this extension offer?
 
 This extension enables faster image generation without the need for expensive GPUs and seamlessly integrates with the AUTOMAIC1111 UI.

@@ -1,6 +1,5 @@
 import modules.scripts as scripts
 import gradio as gr
-import os
 
 from modules import script_callbacks
 from extension import api
@@ -35,7 +34,7 @@ def on_ui_tabs():
                                                   interactive=False)
 
                 gr.HTML(value="""
-                                Register for a free key at <u><a href="https://omniinfer.io?utm_source=sd-webui" target="_blank">omniinfer.io</a></u>.
+                                Register for a free key at <u><a href="https://github.com/omniinfer/sd-webui-cloud-inference/wiki/Stable-Diffusion-WebUI-Cloud-Inference-Tutorial#2-obtain-key-from-omniinferio" target="_blank">Stable Diffusion WebUI Cloud Inference Tutorial</a></u>.
                                 """)
 
                 def test_callback(key):
@@ -50,6 +49,11 @@ def on_ui_tabs():
                 test_button.click(fn=test_callback,
                                   inputs=[key_textbox],
                                   outputs=[test_message_textbox])
+        with gr.Tab(label="Additional Providers"):
+            gr.Markdown("""
+            # Do you require support for additional api providers?
+            discuss in [Github](https://github.com/omniinfer/sd-webui-cloud-inference/discussions/new?category=general)
+            """)
 
         return [(ui_component, "Cloud Inference", "extension_template_tab")]
 

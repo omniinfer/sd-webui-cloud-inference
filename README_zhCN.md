@@ -1,5 +1,7 @@
 # Stable Diffusion Web UI Cloud Inference
 
+[![](https://dcbadge.vercel.app/api/server/kJCEK9zf)](https://discord.gg/kJCEK9zf)
+
 ## 这个插件能做什么？
 该插件能够让你通过云端更快的生成图片，而不需要购买昂贵的 GPU 资源，并且能够和  AUTOMAIC1111 UI 无缝兼容
 
