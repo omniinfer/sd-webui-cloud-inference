@@ -458,11 +458,11 @@ class OmniinferAPI(BaseAPI):
                     controlnet_arg['module'] = c.module
 
                     if c.control_mode == "Balanced":
-                        controlnet_arg['control_mode'] = 1
+                        controlnet_arg['control_mode'] = 0
                     elif c.control_mode == "My prompt is more important":
-                        controlnet_arg['control_mode'] = 2
+                        controlnet_arg['control_mode'] = 1
                     elif c.control_mode == "ControlNet is more important":
-                        controlnet_arg['control_mode'] = 3
+                        controlnet_arg['control_mode'] = 2
                     else:
                         return
 
