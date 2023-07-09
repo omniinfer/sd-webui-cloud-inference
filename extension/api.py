@@ -63,6 +63,7 @@ class Checkpoint(object):
         self.name = name
         self.rating = rating
         self.loras = loras
+
         if self.loras is None:
             self.loras = []
         self.example = example
@@ -88,7 +89,7 @@ class OmniinferAPI(BaseAPI):
         if self._token is not None:
             self._token = token
         self._models = None
-        # self._txt2img_timeout = 30
+        self._session = requests.Session()
 
     @classmethod
     def load_from_config(cls):
@@ -206,7 +207,7 @@ class OmniinferAPI(BaseAPI):
         }
 
         try:
-            res = requests.post("http://api.omniinfer.io/v2/txt2img",
+            res = self._session.post("http://api.omniinfer.io/v2/txt2img",
                                 json=payload,
                                 headers=headers,
                                 params={"key": self._token})
@@ -281,10 +282,11 @@ class OmniinferAPI(BaseAPI):
             if state.skipped or state.interrupted:
                 raise Exception("Interrupted")
 
-            task_res = requests.get("http://api.omniinfer.io/v2/progress",
+            task_res = self._session.get("http://api.omniinfer.io/v2/progress",
                                     params={
                                         "key": self._token,
-                                        "task_id": task_id
+                                        "task_id": task_id,
+            				'Accept-Encoding': 'gzip, deflate',
                                     },
                                     headers={"X-OmniInfer-Source": "sd-webui"})
 
@@ -294,7 +296,9 @@ class OmniinferAPI(BaseAPI):
             status_code = task_res_json["data"]["status"]
 
             if status_code == STATUS_CODE_PROGRESSING:
-                global_progress += 0.7 * generate_progress
+                global_progress += (0.7 * generate_progress)
+                if global_progress >= 0.9:
+                    global_progress = 0.9 # reverse download time
             if status_code == STATUS_CODE_PENDING and global_progress < 0.2:
                 global_progress += 0.05
             elif status_code == STATUS_CODE_SUCCESS:
@@ -306,7 +310,8 @@ class OmniinferAPI(BaseAPI):
                 raise Exception("failed to generate image({}): {}",
                                 task_res_json["data"]["failed_reason"])
 
-            state.sampling_step = state.sampling_steps * state.job_count * global_progress
+            state.sampling_step = int(state.sampling_steps * state.job_count *
+                                      global_progress)
 
             attempts -= 1
             time.sleep(0.5)
@@ -504,6 +509,7 @@ class OmniinferAPI(BaseAPI):
 
         print("[cloud-inference] refreshing models...")
         results = []
+
         res = requests.get(url, headers=headers)
         if res.status_code >= 400:
             return []
@@ -557,7 +563,8 @@ def retrieve_images(img_urls) -> list[Image.Image]:
     applied = []
     for img_url in img_urls:
         applied.append(pool.apply_async(_download, (img_url, )))
-    return [r.get() for r in applied]
+    ret = [r.get() for r in applied]
+    return ret
 
 
 _instance = None

@@ -304,9 +304,9 @@ class DataBinding:
                         prompt = ckpt.example.prompts
                     if ckpt.example.neg_prompt is not None and self.suggest_prompts_enabled:
                         neg_prompt = ckpt.example.neg_prompt
-                return gr.update(choices=ckpt.loras), gr.update(
+                return gr.update(choices=ckpt.loras, value=[]), gr.update(
                     value=prompt), gr.update(value=neg_prompt)
-        return gr.update(choices=[]), gr.update(value=prompt), gr.update(
+        return gr.update(choices=[], value=[]), gr.update(value=prompt), gr.update(
             value=neg_prompt)
 
     def update_selected_lora(self, lora_names, prompt):
