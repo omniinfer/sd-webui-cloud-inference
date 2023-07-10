@@ -3,6 +3,10 @@
 
 [![](https://dcbadge.vercel.app/api/server/kJCEK9zf)](https://discord.gg/kJCEK9zf)
 
+[![IMAGE ALT TEXT](http://img.youtube.com/vi/p6A1k-L1BYg/0.jpg)](http://www.youtube.com/watch?v=p6A1k-L1BYg "SD WebUI Cloud : Achieve 10x Acceleration with Best Cheap GPUs#stablediffusion #webui #text2image
+")
+
+
 ## What capabilities does this extension offer?
 
 This extension enables faster image generation without the need for expensive GPUs and seamlessly integrates with the AUTOMAIC1111 UI.
