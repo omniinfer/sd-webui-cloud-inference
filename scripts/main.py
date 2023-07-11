@@ -21,6 +21,42 @@ class _Proxy(object):
         self._fn = fn
         self._patched = False
 
+    def _apply_xyz(self):
+
+        def find_module(module_names):
+            if isinstance(module_names, str):
+                module_names = [s.strip() for s in module_names.split(",")]
+            for data in scripts.scripts_data:
+                if data.script_class.__module__ in module_names and hasattr(
+                        data, "module"):
+                    return data.module
+            return None
+
+        xyz_grid = find_module("xyz_grid.py, xy_grid.py")
+        if xyz_grid:
+
+            def xyz_model_apply(p, opt, v):
+                m = _binding.choice_to_model(opt)
+                if m.kind == 'lora':
+                    p._remote_model_name = m.dependency_model_name
+                    p.prompt = _binding._add_lora_in_prompt(p.prompt, m.name)
+                else:
+                    p._remote_model_name = m.name
+
+            def xyz_model_confirm(p, opt):
+                return
+
+            def xyz_model_format(p, opt, v):
+                return _binding.choice_to_model(v).name.rsplit(".", 1)[0]
+
+            xyz_grid.axis_options.append(
+                xyz_grid.AxisOption('[Cloud Inference] Model Name',
+                                    str,
+                                    apply=xyz_model_apply,
+                                    confirm=xyz_model_confirm,
+                                    format_value=xyz_model_format,
+                                    choices=_binding.get_model_choices))
+
     def monkey_patch(self):
         if self._patched:
             return
@@ -45,7 +81,11 @@ class _Proxy(object):
                     script.module, 'processing'
             ) and script.module.processing.__name__ == 'modules.processing':
                 script.module.processing.process_images = self
+
+        self._apply_xyz()
         print('[cloud-inference] monkey patched')
+
+
         self._patched = True
 
     def __call__(self, *args, **kwargs) -> Processed:
@@ -69,7 +109,8 @@ class _Proxy(object):
 
         state.textinfo = "remote inferencing ({})".format(
             api.get_instance().__class__.__name__)
-        p._remote_model_name = _binding.selected_checkpoint.name
+        if not getattr(p, '_remote_model_name', None):  # xyz_grid
+            p._remote_model_name = _binding.selected_checkpoint.name
 
         if isinstance(p, StableDiffusionProcessingTxt2Img):
             generated_images = api.get_instance().txt2img(p)
@@ -202,26 +243,52 @@ def create_infotext(p,
             p)
 
     generation_params = {
-        "Steps": p.steps,
-        "Sampler": p.sampler_name,
-        "CFG scale": p.cfg_scale,
-        "Image CFG scale": getattr(p, 'image_cfg_scale', None),
-        "Seed": all_seeds[index],
-        "Face restoration": (opts.face_restoration_model if p.restore_faces else None),
-        "Size": f"{p.width}x{p.height}", 
-        "Model": (None if not opts.add_model_name_to_info or not p._remote_model_name else p._remote_model_name.replace(',', '').replace(':', '')),
-        "Variation seed": (None if p.subseed_strength == 0 else all_subseeds[index]),
-        "Variation seed strength": (None if p.subseed_strength == 0 else p.subseed_strength),
-        "Seed resize from": (None if p.seed_resize_from_w == 0 or p.seed_resize_from_h == 0 else f"{p.seed_resize_from_w}x{p.seed_resize_from_h}"),
-        "Denoising strength": getattr(p, 'denoising_strength', None),
-        "Conditional mask weight": getattr(p, "inpainting_mask_weight", opts.inpainting_mask_weight) if p.is_using_inpainting_conditioning else None, "Clip skip": None if clip_skip <= 1 else clip_skip,
-        "ENSD": getattr(opts, 'eta_noise_seed_delta', None) if uses_ensd else None,
-        "Token merging ratio": None if token_merging_ratio == 0 else token_merging_ratio,
-        "Token merging ratio hr": None if not enable_hr or token_merging_ratio_hr == 0 else token_merging_ratio_hr,
-        "Init image hash": getattr(p, 'init_img_hash', None),
-        "RNG": None,
-        "NGMS": None,
-        "Version": None,
+        "Steps":
+        p.steps,
+        "Sampler":
+        p.sampler_name,
+        "CFG scale":
+        p.cfg_scale,
+        "Image CFG scale":
+        getattr(p, 'image_cfg_scale', None),
+        "Seed":
+        all_seeds[index],
+        "Face restoration":
+        (opts.face_restoration_model if p.restore_faces else None),
+        "Size":
+        f"{p.width}x{p.height}",
+        "Model":
+        (None if not opts.add_model_name_to_info or not p._remote_model_name
+         else p._remote_model_name.replace(',', '').replace(':', '')),
+        "Variation seed":
+        (None if p.subseed_strength == 0 else all_subseeds[index]),
+        "Variation seed strength":
+        (None if p.subseed_strength == 0 else p.subseed_strength),
+        "Seed resize from":
+        (None if p.seed_resize_from_w == 0 or p.seed_resize_from_h == 0 else
+         f"{p.seed_resize_from_w}x{p.seed_resize_from_h}"),
+        "Denoising strength":
+        getattr(p, 'denoising_strength', None),
+        "Conditional mask weight":
+        getattr(p, "inpainting_mask_weight", opts.inpainting_mask_weight)
+        if p.is_using_inpainting_conditioning else None,
+        "Clip skip":
+        None if clip_skip <= 1 else clip_skip,
+        "ENSD":
+        getattr(opts, 'eta_noise_seed_delta', None) if uses_ensd else None,
+        "Token merging ratio":
+        None if token_merging_ratio == 0 else token_merging_ratio,
+        "Token merging ratio hr":
+        None if not enable_hr or token_merging_ratio_hr == 0 else
+        token_merging_ratio_hr,
+        "Init image hash":
+        getattr(p, 'init_img_hash', None),
+        "RNG":
+        None,
+        "NGMS":
+        None,
+        "Version":
+        None,
         **p.extra_generation_params,
     }
 
@@ -229,9 +296,10 @@ def create_infotext(p,
     if getattr(p, 's_min_ucond', None) is not None:
         if p.s_min_uncond != 0:
             generation_params["NGMS"] = p.s_min_uncond
-    if getattr(opts, 'randn_source', None) is not None and opts.randn_source != "GPU":
+    if getattr(opts, 'randn_source',
+               None) is not None and opts.randn_source != "GPU":
         generation_params["RNG"] = opts.randn_source
-    
+
     if getattr(opts, 'add_version_to_infotext', None):
         if opts.add_version_to_infotext:
             generation_params['Version'] = processing.program_version()
@@ -249,11 +317,6 @@ def create_infotext(p,
     )
 
 
-_proxy = _Proxy(processing.process_images)
-_proxy.monkey_patch()
-print('Loading extension: sd-webui-cloud-inference')
-
-
 class DataBinding:
 
     def __init__(self):
@@ -266,10 +329,10 @@ class DataBinding:
         self.txt2img_neg_prompt = None
         self.txt2img_generate = None
         self.img2img_generate = None
-        self.remote_checkpoints = None
-        self.remote_checkpoint_dropdown = None
+        self.remote_sd_models = None
+        self.remote_model_dropdown = None
         self.remote_lora_checkbox_group = None
-        self.selected_checkpoint = None # checkpoint object
+        self.selected_checkpoint = None  # checkpoint object
         self.cloud_api_dropdown = None
         self.update_suggest_prompts_checkbox = None
         self.suggest_prompts_enabled = True
@@ -292,42 +355,74 @@ class DataBinding:
             return v, "Generate (cloud)"
         return v, "Generate"
 
-    def update_selected_model(self, name_index, prompt, neg_prompt):
-        self.selected_checkpoint = self.remote_checkpoints[name_index]
-        name = self.remote_checkpoints[name_index].name
+    def update_selected_model(self, name_index: int, prompt: str,
+                              neg_prompt: str):
+        selected: api.StableDiffusionModel = self.remote_sd_models[name_index]
+        selected_checkpoint: api.StableDiffusionModel = None
+        selected_checkpoint_index: int = 0
+        selected_loras = []
+
+        # if selected model is lora, then we need to get base model of it and set selected model to base model
+        if selected.kind == 'lora':
+            for idx, model in enumerate(self.remote_sd_models):
+                if model.name == selected.dependency_model_name:
+                    selected_checkpoint = model
+                    # selected_checkpoint_index = idx
+                    selected_loras = [selected.name]
+                    break
+        else:
+            selected_checkpoint = selected
+            # selected_checkpoint_index = name_index
+
+        self.selected_checkpoint = selected_checkpoint
+
+        name = self.remote_sd_models[name_index].name
         print("[cloud-inference] set_selected_model", name)
 
         prompt = prompt
         neg_prompt = neg_prompt
 
-        for ckpt in self.remote_checkpoints:
-            if ckpt.name == name:
-                if ckpt.example is not None:
-                    if ckpt.example.prompts is not None and self.suggest_prompts_enabled:
-                        prompt = ckpt.example.prompts
-                    if ckpt.example.neg_prompt is not None and self.suggest_prompts_enabled:
-                        neg_prompt = ckpt.example.neg_prompt
-                return gr.update(choices=ckpt.loras, value=[]), gr.update(
-                    value=prompt), gr.update(value=neg_prompt)
-        return gr.update(choices=[], value=[]), gr.update(value=prompt), gr.update(
-            value=neg_prompt)
+        if selected.example is not None:
+            if selected.example.prompts is not None and self.suggest_prompts_enabled:
+                prompt = selected.example.prompts
+                prompt = prompt.replace("\n", "")
+                if len(selected_loras) > 0:
+                    prompt = self._add_lora_in_prompt(selected.example.prompts,
+                                                      selected_loras)
+                prompt = prompt.replace("\n", "")
+            if selected.example.neg_prompt is not None and self.suggest_prompts_enabled:
+                neg_prompt = selected.example.neg_prompt
 
-    def update_selected_lora(self, lora_names, prompt):
-        print("[cloud-inference] set_selected_lora")
-        # return prompt + ", " + lora_name
+        return gr.Dropdown.update(
+            choices=[_.display_name for _ in self.remote_sd_models],
+            value=selected_checkpoint.display_name), gr.update(
+                choices=[_ for _ in selected_checkpoint.child],
+                value=selected_loras), gr.update(value=prompt), gr.update(
+                    value=neg_prompt)
 
+    @staticmethod
+    def _add_lora_in_prompt(prompt, lora_names, weight=1):
+        prompt = prompt
         add_lora_prompts = []
 
-        for lora in lora_names:
-            if '<lora:{}:'.format(lora) not in prompt:
-                add_lora_prompts.append("<lora:{}:1>".format(lora))
+        for lora_name in lora_names:
+            if '<lora:{}:'.format(lora_name) not in prompt:
+                add_lora_prompts.append("<lora:{}:{}>".format(
+                    lora_name, weight))
 
         if len(add_lora_prompts) > 0 and (not prompt.endswith(", ")
                                           and not prompt.endswith(",")):
             prompt = prompt + ", "
 
-        return gr.update(
-            value="{}{}".format(prompt, ", ".join(add_lora_prompts)))
+        return prompt + ", ".join(add_lora_prompts)
+
+    @staticmethod
+    def _del_lora_in_prompt(self, prompt, lora_name):
+        pass
+
+    def update_selected_lora(self, lora_names, prompt):
+        print("[cloud-inference] set_selected_lora", lora_names)
+        return gr.update(value=self._add_lora_in_prompt(prompt, lora_names))
 
     def update_cloud_api(self, v):
         # TODO: support multiple cloud api provider
@@ -336,11 +431,19 @@ class DataBinding:
 
     def get_selected_model_loras(self):
         ret = []
-        for ckpt in self.remote_checkpoints:
+        for ckpt in self.remote_sd_models:
             if ckpt.name == self.selected_checkpoint.name:
-                for lora_name in ckpt.loras:
+                for lora_name in ckpt.child:
                     ret.append(lora_name)
         return ret
+
+    def choice_to_model(self, choice):
+        for model in self.remote_sd_models:
+            if model.display_name == choice:
+                return model
+
+    def get_model_choices(self):
+        return [_.display_name for _ in self.remote_sd_models]
 
 
 class CloudInferenceScript(scripts.Script):
@@ -434,67 +537,76 @@ class CloudInferenceScript(scripts.Script):
                 # remote checkpoint
                 if not _binding.initialized:
                     try:
-                        _binding.remote_checkpoints = api.get_instance().list_models()
-                        if _binding.remote_checkpoints is None or len(
-                                _binding.remote_checkpoints) == 0:
+                        _binding.remote_sd_models = api.get_instance(
+                        ).list_models()
+                        if _binding.remote_sd_models is None or len(
+                                _binding.remote_sd_models) == 0:
                             api.get_instance().refresh_models()
-                            _binding.remote_checkpoints = api.get_instance().list_models()
+                            _binding.remote_sd_models = api.get_instance(
+                            ).list_models()
 
-                        _checkpoint_choices = [m.display_name for m in _binding.remote_checkpoints]
                     except Exception as e:
                         print(traceback.format_exc())
-                        _checkpoint_choices = []
 
-                    def select_top_n():
-                        top_n = min(len(_binding.remote_checkpoints), 50)
-                        _binding.selected_checkpoint = random.choice(_binding.remote_checkpoints[:top_n]) if len(_binding.remote_checkpoints) > 0 else None
+                    def select_default_checkpoint_of_top_n():
+                        top_n = min(len(_binding.remote_sd_models), 50)
+                        _binding.selected_checkpoint = random.choice(
+                            _binding.remote_sd_models[:top_n]) if len(
+                                _binding.remote_sd_models) > 0 else None
 
-                        print("[cloud-inference] default checkpoint {}".format(_binding.selected_checkpoint.name))
+                        print("[cloud-inference] default checkpoint {}".format(
+                            _binding.selected_checkpoint.name))
 
-                    select_top_n()  # TODO: random top n after refresh page
-
-                    _binding.remote_checkpoint_dropdown = gr.Dropdown(
-                        label="Checkpoint",
-                        choices=_checkpoint_choices,
-                        value=_binding.selected_checkpoint.display_name,
-                        type="index",
-                        elem_id="remote_checkpoint_dropdown")
+                    select_default_checkpoint_of_top_n(
+                    )  # TODO: random top n after refresh page
 
                     _binding.initialized = True
 
+                _binding.remote_model_dropdown = gr.Dropdown(
+                    label="Cloud Models (ckpt/lora)",
+                    choices=_binding.get_model_choices(),
+                    value=_binding.selected_checkpoint.display_name,
+                    type="index",
+                    elem_id="remote_model_dropdown")
+
                 def _refresh():
-                    _binding.remote_checkpoints = api.get_instance().list_models()
-                    return {"choices":[_.display_name for _ in _binding.remote_checkpoints]}
-
-                ui.create_refresh_button(_binding.remote_checkpoint_dropdown, api.get_instance().refresh_models, _refresh, "Refresh")
-
-                with gr.Column():
-                    # remote lora
-                    _binding.remote_lora_checkbox_group = gr.CheckboxGroup(
-                        _binding.get_selected_model_loras(),
-                        label="Lora",
-                        elem_id="remote_lora_dropdown")
-
-                    _binding.remote_checkpoint_dropdown.select(
-                        fn=_binding.update_selected_model,
-                        inputs=[
-                            _binding.remote_checkpoint_dropdown,
-                            _binding.txt2img_prompt,
-                            _binding.txt2img_neg_prompt
-                        ],
-                        outputs=[
-                            _binding.remote_lora_checkbox_group,
-                            _binding.txt2img_prompt,
-                            _binding.txt2img_neg_prompt
-                        ])
-                    _binding.remote_lora_checkbox_group.select(
-                        fn=lambda x, y: _binding.update_selected_lora(x, y),
-                        inputs=[
-                            _binding.remote_lora_checkbox_group,
-                            _binding.txt2img_prompt
-                        ],
-                        outputs=_binding.txt2img_prompt,
+                    _binding.remote_sd_models = api.get_instance().list_models(
                     )
+                    return {
+                        "choices":
+                        [_.display_name for _ in _binding.remote_sd_models]
+                    }
+
+                ui.create_refresh_button(_binding.remote_model_dropdown,
+                                         api.get_instance().refresh_models,
+                                         _refresh, "Refresh")
+
+            with gr.Column():
+                # remote lora
+                _binding.remote_lora_checkbox_group = gr.CheckboxGroup(
+                    _binding.get_selected_model_loras(),
+                    label="Lora",
+                    elem_id="remote_lora_dropdown")
+
+                _binding.remote_model_dropdown.select(
+                    fn=_binding.update_selected_model,
+                    inputs=[
+                        _binding.remote_model_dropdown,
+                        _binding.txt2img_prompt, _binding.txt2img_neg_prompt
+                    ],
+                    outputs=[
+                        _binding.remote_model_dropdown,
+                        _binding.remote_lora_checkbox_group,
+                        _binding.txt2img_prompt, _binding.txt2img_neg_prompt
+                    ])
+                _binding.remote_lora_checkbox_group.select(
+                    fn=lambda x, y: _binding.update_selected_lora(x, y),
+                    inputs=[
+                        _binding.remote_lora_checkbox_group,
+                        _binding.txt2img_prompt
+                    ],
+                    outputs=_binding.txt2img_prompt,
+                )
 
         enable_remote_inference = None
         if is_img2img:
@@ -503,7 +615,7 @@ class CloudInferenceScript(scripts.Script):
             enable_remote_inference = _binding.txt2img_enable_remote_inference
 
         return [
-            _binding.remote_checkpoint_dropdown,
+            _binding.remote_model_dropdown,
             enable_remote_inference,
             _binding.remote_lora_checkbox_group,
         ]
@@ -512,6 +624,10 @@ class CloudInferenceScript(scripts.Script):
 _binding = None
 if _binding is None:
     _binding = DataBinding()
+
+_proxy = _Proxy(processing.process_images)
+_proxy.monkey_patch()
+print('Loading extension: sd-webui-cloud-inference')
 
 
 def on_after_component_callback(component, **_kwargs):
