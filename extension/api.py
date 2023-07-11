@@ -12,9 +12,16 @@ import copy
 import json
 from types import SimpleNamespace
 from .utils import image_to_base64, read_image_files
+from .version import __version__
 
 OMNIINFER_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 '.omniinfer.json')
+
+
+def _user_agent(model_name=None):
+    if model_name:
+        return 'sd-webui-cloud-inference/{} (model_name: {})'.format(__version__, model_name)
+    return 'sd-webui-cloud-inference/{}'.format(__version__)
 
 
 class BaseAPI(object):
@@ -112,6 +119,7 @@ class OmniinferAPI(BaseAPI):
             self._token = token
         self._models = None
         self._session = requests.Session()
+        self._session.headers.update({'User-Agent': _user_agent()})
 
     @classmethod
     def load_from_config(cls):
@@ -231,7 +239,8 @@ class OmniinferAPI(BaseAPI):
             "accept": "application/json",
             "content-type": "application/json",
             'Accept-Encoding': 'gzip, deflate',
-            "X-OmniInfer-Source": "source"
+            "X-OmniInfer-Source": _user_agent(model_name),
+            "User-Agent": _user_agent(model_name)
         }
 
         try:
@@ -284,7 +293,8 @@ class OmniinferAPI(BaseAPI):
             "accept": "application/json",
             "content-type": "application/json",
             'Accept-Encoding': 'gzip, deflate',
-            "X-OmniInfer-Source": "sd-webui"
+            "X-OmniInfer-Source": _user_agent(model_name),
+            "User-Agent": _user_agent(model_name)
         }
 
         res = requests.post("http://api.omniinfer.io/v2/img2img",
@@ -527,7 +537,8 @@ class OmniinferAPI(BaseAPI):
         headers = {
             "accept": "application/json",
             'Accept-Encoding': 'gzip, deflate',
-            "X-OmniInfer-Source": "sd-webui"
+            "X-OmniInfer-Source": _user_agent(),
+            "User-Agent": _user_agent()
         }
 
         print("[cloud-inference] refreshing models...")
