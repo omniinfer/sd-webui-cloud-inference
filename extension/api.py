@@ -20,7 +20,8 @@ OMNIINFER_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 def _user_agent(model_name=None):
     if model_name:
-        return 'sd-webui-cloud-inference/{} (model_name: {})'.format(__version__, model_name)
+        return 'sd-webui-cloud-inference/{} (model_name: {})'.format(
+            __version__, model_name)
     return 'sd-webui-cloud-inference/{}'.format(__version__)
 
 
@@ -302,7 +303,10 @@ class OmniinferAPI(BaseAPI):
                             headers=headers,
                             params={"key": self._token})
 
-        json_data = res.json()
+        try:
+            json_data = res.json()
+        except Exception:
+            raise Exception("Request failed: {}".format(res.text))
 
         return json_data['data']['task_id']
 
@@ -364,9 +368,13 @@ class OmniinferAPI(BaseAPI):
 
         controlnet_batchs = self.check_controlnet_arg(p)
 
+        live_previews_image_format = "png"
+        if getattr(opts, 'live_previews_image_format', None):
+            live_previews_image_format = opts.live_previews_image_format
+
         images_base64 = []
         for i in p.init_images:
-            if opts.live_previews_image_format == "png":
+            if live_previews_image_format == "png":
                 # using optimize for large images takes an enormous amount of time
                 if max(*i.size) <= 256:
                     save_kwargs = {"optimize": True}
@@ -378,7 +386,7 @@ class OmniinferAPI(BaseAPI):
 
             buffered = io.BytesIO()
             i.save(buffered,
-                   format=opts.live_previews_image_format,
+                   format=live_previews_image_format,
                    **save_kwargs)
             base64_image = base64.b64encode(
                 buffered.getvalue()).decode('ascii')
