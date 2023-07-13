@@ -13,6 +13,9 @@ from extension import api
 from inspect import getmembers, isfunction
 import random
 import traceback
+import os
+
+DEMO_MODE = os.getenv("CLOUD_INFERENCE_DEMO_MODE")
 
 
 class _Proxy(object):
@@ -323,7 +326,7 @@ class DataBinding:
         self.txt2img_enable_remote_inference = None
         self.img2img_enable_remote_inference = None
 
-        self.remote_inference_enabled = False
+        self.remote_inference_enabled = True if DEMO_MODE else False
         self.txt2img_prompt = None
         self.txt2img_neg_prompt = None
         self.txt2img_generate = None
@@ -465,52 +468,57 @@ class CloudInferenceScript(scripts.Script):
         with gr.Accordion('Cloud Inference', open=True):
             with gr.Row():
 
-                if _binding.enable_remote_inference is None:
-                    _binding.enable_remote_inference = gr.Checkbox(
-                        value=False,
-                        visible=False,
-                        label="Enable",
-                        elem_id="enable_remote_inference")
+                if not DEMO_MODE:
+                    if _binding.enable_remote_inference is None:
+                        _binding.enable_remote_inference = gr.Checkbox(
+                            value=False,
+                            visible=False,
+                            label="Enable",
+                            elem_id="enable_remote_inference")
 
                 if is_img2img:
-                    _binding.img2img_enable_remote_inference = gr.Checkbox(
-                        value=lambda: _binding.remote_inference_enabled,
-                        label="Enable",
-                        elem_id="img2img_enable_remote_inference")
+                    if not DEMO_MODE:
+                        _binding.img2img_enable_remote_inference = gr.Checkbox(
+                            value=lambda: _binding.remote_inference_enabled,
+                            label="Enable",
+                            elem_id="img2img_enable_remote_inference")
 
-                    _binding.enable_remote_inference.change(
-                        fn=lambda x: _binding.update_remote_inference_enabled(
-                            x),
-                        inputs=[_binding.enable_remote_inference],
-                        outputs=[
-                            _binding.img2img_enable_remote_inference,
-                            _binding.img2img_generate
-                        ])
+                        _binding.enable_remote_inference.change(
+                            fn=lambda x: _binding.
+                            update_remote_inference_enabled(x),
+                            inputs=[_binding.enable_remote_inference],
+                            outputs=[
+                                _binding.img2img_enable_remote_inference,
+                                _binding.img2img_generate
+                            ])
 
-                    _binding.img2img_enable_remote_inference.change(
-                        fn=lambda x: _binding.set_remote_inference_enabled(x),
-                        inputs=[_binding.img2img_enable_remote_inference],
-                        outputs=[_binding.enable_remote_inference])
+                        _binding.img2img_enable_remote_inference.change(
+                            fn=lambda x: _binding.set_remote_inference_enabled(
+                                x),
+                            inputs=[_binding.img2img_enable_remote_inference],
+                            outputs=[_binding.enable_remote_inference])
 
                 else:
-                    _binding.txt2img_enable_remote_inference = gr.Checkbox(
-                        value=lambda: _binding.remote_inference_enabled,
-                        label="Enable",
-                        elem_id="txt2img_enable_remote_inference")
+                    if not DEMO_MODE:
+                        _binding.txt2img_enable_remote_inference = gr.Checkbox(
+                            value=lambda: _binding.remote_inference_enabled,
+                            label="Enable",
+                            elem_id="txt2img_enable_remote_inference")
 
-                    _binding.enable_remote_inference.change(
-                        fn=lambda x: _binding.update_remote_inference_enabled(
-                            x),
-                        inputs=[_binding.enable_remote_inference],
-                        outputs=[
-                            _binding.txt2img_enable_remote_inference,
-                            _binding.txt2img_generate
-                        ])
+                        _binding.enable_remote_inference.change(
+                            fn=lambda x: _binding.
+                            update_remote_inference_enabled(x),
+                            inputs=[_binding.enable_remote_inference],
+                            outputs=[
+                                _binding.txt2img_enable_remote_inference,
+                                _binding.txt2img_generate
+                            ])
 
-                    _binding.txt2img_enable_remote_inference.change(
-                        fn=lambda x: _binding.set_remote_inference_enabled(x),
-                        inputs=[_binding.txt2img_enable_remote_inference],
-                        outputs=[_binding.enable_remote_inference])
+                        _binding.txt2img_enable_remote_inference.change(
+                            fn=lambda x: _binding.set_remote_inference_enabled(
+                                x),
+                            inputs=[_binding.txt2img_enable_remote_inference],
+                            outputs=[_binding.enable_remote_inference])
 
                 _binding.enable_suggest_prompts_checkbox = gr.Checkbox(
                     value=_binding.suggest_prompts_enabled,
@@ -607,15 +615,20 @@ class CloudInferenceScript(scripts.Script):
                     outputs=_binding.txt2img_prompt,
                 )
 
-        enable_remote_inference = None
-        if is_img2img:
-            enable_remote_inference = _binding.img2img_enable_remote_inference
-        else:
-            enable_remote_inference = _binding.txt2img_enable_remote_inference
+        if not DEMO_MODE:
+            enable_remote_inference = None
+            if is_img2img:
+                enable_remote_inference = _binding.img2img_enable_remote_inference
+            else:
+                enable_remote_inference = _binding.txt2img_enable_remote_inference
 
+            return [
+                _binding.remote_model_dropdown,
+                enable_remote_inference,
+                _binding.remote_lora_checkbox_group,
+            ]
         return [
             _binding.remote_model_dropdown,
-            enable_remote_inference,
             _binding.remote_lora_checkbox_group,
         ]
 
