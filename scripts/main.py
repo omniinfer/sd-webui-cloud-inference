@@ -5,7 +5,7 @@ import importlib
 
 from modules import images, script_callbacks, processing, ui
 from modules import images, script_callbacks
-from modules import processing
+from modules import processing, shared
 from modules.processing import Processed, StableDiffusionProcessingImg2Img, StableDiffusionProcessingTxt2Img
 from modules.shared import opts, state, prompt_styles
 from extension import api
@@ -85,7 +85,6 @@ class _Proxy(object):
         self._apply_xyz()
         print('[cloud-inference] monkey patched')
 
-
         self._patched = True
 
     def __call__(self, *args, **kwargs) -> Processed:
@@ -111,7 +110,7 @@ class _Proxy(object):
             api.get_instance().__class__.__name__)
         if not getattr(p, '_remote_model_name', None):  # xyz_grid
             p._remote_model_name = _binding.selected_checkpoint.name
-        
+
         if isinstance(p, StableDiffusionProcessingTxt2Img):
             generated_images = api.get_instance().txt2img(p)
         elif isinstance(p, StableDiffusionProcessingImg2Img):
@@ -565,7 +564,7 @@ class CloudInferenceScript(scripts.Script):
                 _binding.remote_model_dropdown = gr.Dropdown(
                     label="Cloud Models (ckpt/lora)",
                     choices=_binding.get_model_choices(),
-                    value=_binding.selected_checkpoint.display_name,
+                    value=lambda: _binding.selected_checkpoint.display_name,
                     type="index",
                     elem_id="remote_model_dropdown")
 
