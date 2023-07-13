@@ -354,7 +354,6 @@ class OmniinferAPI(BaseAPI):
             generate_progress = task_res_json["data"]["progress"]
 
             status_code = task_res_json["data"]["status"]
-            print(task_res_json)
 
             if status_code == STATUS_CODE_PROGRESSING:
                 global_progress += (0.7 * generate_progress)
@@ -628,17 +627,23 @@ class OmniinferAPI(BaseAPI):
 
 
 def retrieve_images(img_urls):
-
     def _download(img_url):
-        response = requests.get(img_url)
-        return Image.open(io.BytesIO(response.content))
+        attempts = 5
+        while attempts > 0:
+            try:
+                response = requests.get(img_url, timeout=2)
+                return Image.open(io.BytesIO(response.content))
+            except Exception:
+                print("[cloud-inference] failed to download image, retrying...")
+            attempts -= 1
+        return None
 
     pool = ThreadPool()
     applied = []
     for img_url in img_urls:
         applied.append(pool.apply_async(_download, (img_url, )))
     ret = [r.get() for r in applied]
-    return ret
+    return [_ for _ in ret if _ is not None]
 
 
 _instance = None
