@@ -2,7 +2,7 @@ import requests
 import time
 import io
 import base64
-from modules import sd_samplers
+from modules import sd_samplers, processing
 from modules.shared import opts, state
 from PIL import Image
 from multiprocessing.pool import ThreadPool
@@ -10,7 +10,6 @@ import random
 import os
 import copy
 import json
-from types import SimpleNamespace
 from .utils import image_to_base64, read_image_files
 from .version import __version__
 
@@ -27,16 +26,19 @@ def _user_agent(model_name=None):
 
 class BaseAPI(object):
 
-    def txt2img(self, p) -> list[Image.Image]:
+    def txt2img(self,
+                p: processing.StableDiffusionProcessing):
         pass
 
-    def img2img(self, p) -> list[Image.Image]:
+    def img2img(
+            self, p: processing.StableDiffusionProcessingTxt2Img
+    ):
         pass
 
-    def list_models() -> list[str]:
+    def list_models():
         pass
 
-    def refresh_models() -> list[str]:
+    def refresh_models():
         pass
 
 
@@ -262,7 +264,9 @@ class OmniinferAPI(BaseAPI):
 
     def _img2img(self, model_name, prompts, neg_prompts, sampler_name,
                  batch_size, steps, n_iter, cfg_scale, seed, height, width,
-                 restore_faces, denoising_strength, init_images,
+                 restore_faces, denoising_strength, mask_blur_x, mask_blur_y,
+                 inpainting_fill, inpaint_full_res, inpaint_full_res_padding,
+                 inpainting_mask_invert, initial_noise_multiplier, init_images,
                  controlnet_args):
 
         if self._token is None:
@@ -287,6 +291,13 @@ class OmniinferAPI(BaseAPI):
             "model_name": model_name,
             "restore_faces": restore_faces,
             "denoising_strength": denoising_strength,
+            "mask_blur_x": mask_blur_x,
+            "mask_blur_y": mask_blur_y,
+            "inpainting_fill": inpainting_fill,
+            "inpaint_full_res": inpaint_full_res,
+            "inpaint_full_res_padding": inpaint_full_res_padding,
+            "inpainting_mask_invert": inpainting_mask_invert,
+            "initial_noise_multiplier": initial_noise_multiplier,
             "init_images": init_images,
             "controlnet_units": controlnet_args
         }
@@ -297,6 +308,12 @@ class OmniinferAPI(BaseAPI):
             "X-OmniInfer-Source": _user_agent(model_name),
             "User-Agent": _user_agent(model_name)
         }
+
+        print(
+            '[cloud-inference] call api txt2img: payload: {}'.format({
+                key: value
+                for key, value in payload.items() if key != "controlnet_units"
+            }), )
 
         res = requests.post("http://api.omniinfer.io/v2/img2img",
                             json=payload,
@@ -337,6 +354,7 @@ class OmniinferAPI(BaseAPI):
             generate_progress = task_res_json["data"]["progress"]
 
             status_code = task_res_json["data"]["status"]
+            print(task_res_json)
 
             if status_code == STATUS_CODE_PROGRESSING:
                 global_progress += (0.7 * generate_progress)
@@ -363,7 +381,7 @@ class OmniinferAPI(BaseAPI):
 
     def img2img(
         self,
-        p,
+        p: processing.StableDiffusionProcessingImg2Img,
     ):
 
         controlnet_batchs = self.check_controlnet_arg(p)
@@ -385,9 +403,7 @@ class OmniinferAPI(BaseAPI):
                 save_kwargs = {}
 
             buffered = io.BytesIO()
-            i.save(buffered,
-                   format=live_previews_image_format,
-                   **save_kwargs)
+            i.save(buffered, format=live_previews_image_format, **save_kwargs)
             base64_image = base64.b64encode(
                 buffered.getvalue()).decode('ascii')
             images_base64.append(base64_image)
@@ -397,42 +413,59 @@ class OmniinferAPI(BaseAPI):
             for c in controlnet_batchs:
                 img_urls.extend(
                     self._wait_task_completed(
-                        self._img2img(model_name=p._remote_model_name,
-                                      prompts=p.prompt,
-                                      neg_prompts=p.negative_prompt,
-                                      sampler_name=p.sampler_name,
-                                      batch_size=p.batch_size,
-                                      steps=p.steps,
-                                      n_iter=p.n_iter,
-                                      cfg_scale=p.cfg_scale,
-                                      seed=p.seed,
-                                      height=p.height,
-                                      width=p.width,
-                                      restore_faces=p.restore_faces,
-                                      denoising_strength=p.denoising_strength,
-                                      init_images=images_base64,
-                                      controlnet_args=c)))
+                        self._img2img(
+                            model_name=p._remote_model_name,
+                            prompts=p.prompt,
+                            neg_prompts=p.negative_prompt,
+                            sampler_name=p.sampler_name,
+                            batch_size=p.batch_size,
+                            steps=p.steps,
+                            n_iter=p.n_iter,
+                            cfg_scale=p.cfg_scale,
+                            seed=p.seed,
+                            height=p.height,
+                            width=p.width,
+                            restore_faces=p.restore_faces,
+                            denoising_strength=p.denoising_strength,
+                            mask_blur_x=p.mask_blur_x,
+                            mask_blur_y=p.mask_blur_y,
+                            inpaint_full_res=bool(p.inpaint_full_res),
+                            inpaint_full_res_padding=p.
+                            inpaint_full_res_padding,
+                            inpainting_fill=p.inpainting_fill,
+                            inpainting_mask_invert=p.inpainting_mask_invert,
+                            initial_noise_multiplier=p.initial_noise_multiplier,
+                            init_images=images_base64,
+                            controlnet_args=c)))
         else:
             img_urls.extend(
                 self._wait_task_completed(
-                    self._img2img(model_name=p._remote_model_name,
-                                  prompts=p.prompt,
-                                  neg_prompts=p.negative_prompt,
-                                  sampler_name=p.sampler_name,
-                                  batch_size=p.batch_size,
-                                  steps=p.steps,
-                                  n_iter=p.n_iter,
-                                  cfg_scale=p.cfg_scale,
-                                  seed=p.seed,
-                                  height=p.height,
-                                  width=p.width,
-                                  restore_faces=p.restore_faces,
-                                  denoising_strength=p.denoising_strength,
-                                  init_images=images_base64,
-                                  controlnet_args=[])))
+                    self._img2img(
+                        model_name=p._remote_model_name,
+                        prompts=p.prompt,
+                        neg_prompts=p.negative_prompt,
+                        sampler_name=p.sampler_name,
+                        batch_size=p.batch_size,
+                        steps=p.steps,
+                        n_iter=p.n_iter,
+                        cfg_scale=p.cfg_scale,
+                        seed=p.seed,
+                        height=p.height,
+                        width=p.width,
+                        restore_faces=p.restore_faces,
+                        denoising_strength=p.denoising_strength,
+                        mask_blur_x=p.mask_blur_x,
+                        mask_blur_y=p.mask_blur_y,
+                        inpaint_full_res=bool(p.inpaint_full_res),
+                        inpaint_full_res_padding=p.inpaint_full_res_padding,
+                        inpainting_fill=p.inpainting_fill,
+                        inpainting_mask_invert=p.inpainting_mask_invert,
+                        initial_noise_multiplier=p.initial_noise_multiplier,
+                        init_images=images_base64,
+                        controlnet_args=[])))
         return retrieve_images(img_urls)
 
-    def txt2img(self, p):
+    def txt2img(self, p: processing.StableDiffusionProcessingTxt2Img):
         controlnet_batchs = self.check_controlnet_arg(p)
 
         img_urls = []
@@ -594,7 +627,7 @@ class OmniinferAPI(BaseAPI):
         return sd_models
 
 
-def retrieve_images(img_urls) -> list[Image.Image]:
+def retrieve_images(img_urls):
 
     def _download(img_url):
         response = requests.get(img_url)

@@ -111,7 +111,7 @@ class _Proxy(object):
             api.get_instance().__class__.__name__)
         if not getattr(p, '_remote_model_name', None):  # xyz_grid
             p._remote_model_name = _binding.selected_checkpoint.name
-
+        
         if isinstance(p, StableDiffusionProcessingTxt2Img):
             generated_images = api.get_instance().txt2img(p)
         elif isinstance(p, StableDiffusionProcessingImg2Img):
