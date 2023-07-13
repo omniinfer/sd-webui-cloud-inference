@@ -3,8 +3,9 @@
 
 [![](https://dcbadge.vercel.app/api/server/kJCEK9zf)](https://discord.gg/kJCEK9zf)
 
-[![IMAGE ALT TEXT](http://img.youtube.com/vi/p6A1k-L1BYg/0.jpg)](http://www.youtube.com/watch?v=p6A1k-L1BYg "SD WebUI Cloud : Achieve 10x Acceleration with Best Cheap GPUs#stablediffusion #webui #text2image
-")
+
+[![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/B8s2L_o3DrU/0.jpg)](https://www.youtube.com/watch?v=B8s2L_o3DrU)
+
 
 
 ## What capabilities does this extension offer?
