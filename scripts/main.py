@@ -171,7 +171,7 @@ class _Proxy(object):
                 seed = p.all_seeds[i]
             prompt = None
             if len(p.all_prompts) > i:
-                prompt = p.all_seeds[i]
+                prompt = p.all_prompts[i]
 
             if opts.samples_save and not p.do_not_save_samples:
                 images.save_image(image,
