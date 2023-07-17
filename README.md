@@ -1,7 +1,7 @@
 # Stable Diffusion Web UI Cloud Inference
 
 
-[![](https://dcbadge.vercel.app/api/server/kJCEK9zf)](https://discord.gg/kJCEK9zf)
+[![](https://dcbadge.vercel.app/api/server/nzqq8UScpx)](https://discord.gg/nzqq8UScpx)
 
 
 [![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/B8s2L_o3DrU/0.jpg)](https://www.youtube.com/watch?v=B8s2L_o3DrU)
