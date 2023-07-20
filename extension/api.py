@@ -623,6 +623,7 @@ class OmniinferAPI(BaseAPI):
                     m[model.dependency_model_name].append_child(model.name)
 
         self.__class__.update_models_to_config(sd_models)
+        self._models = sd_models
         return sd_models
 
 

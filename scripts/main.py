@@ -8,6 +8,7 @@ from modules import images, script_callbacks
 from modules import processing, shared
 from modules.processing import Processed, StableDiffusionProcessingImg2Img, StableDiffusionProcessingTxt2Img
 from modules.shared import opts, state, prompt_styles
+from modules.ui_common import ToolButton, refresh_symbol
 from extension import api
 
 from inspect import getmembers, isfunction
@@ -582,17 +583,8 @@ class CloudInferenceScript(scripts.Script):
                     type="index",
                     elem_id="remote_model_dropdown")
 
-                def _refresh():
-                    _binding.remote_sd_models = api.get_instance().list_models(
-                    )
-                    return {
-                        "choices":
-                        [_.display_name for _ in _binding.remote_sd_models]
-                    }
-
-                ui.create_refresh_button(_binding.remote_model_dropdown,
-                                         api.get_instance().refresh_models,
-                                         _refresh, "Refresh")
+                refresh_button = ToolButton(
+                    value=refresh_symbol, elem_id="Refresh")
 
             with gr.Column():
                 _binding.remote_lora_dropdown = gr.Dropdown(
@@ -620,6 +612,18 @@ class CloudInferenceScript(scripts.Script):
                         _binding.txt2img_prompt
                     ],
                     outputs=_binding.txt2img_prompt,
+                )
+
+                def _model_refresh():
+                    api.get_instance().refresh_models()
+                    _binding.remote_sd_models = api.get_instance().list_models()
+                    return gr.update(choices=[_.display_name for _ in _binding.remote_sd_models]), gr.update(choices=[_.name for _ in _binding.remote_sd_models if _.kind == 'lora'])
+
+                refresh_button.click(
+                    fn=_model_refresh,
+                    inputs=[],
+                    outputs=[_binding.remote_model_dropdown,
+                             _binding.remote_lora_dropdown]
                 )
 
         if not DEMO_MODE:
