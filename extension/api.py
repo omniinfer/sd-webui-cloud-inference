@@ -19,8 +19,7 @@ OMNIINFER_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 def _user_agent(model_name=None):
     if model_name:
-        return 'sd-webui-cloud-inference/{} (model_name: {})'.format(
-            __version__, model_name)
+        return 'sd-webui-cloud-inference/{} (model_name: {})'.format(__version__, model_name)
     return 'sd-webui-cloud-inference/{}'.format(__version__)
 
 
