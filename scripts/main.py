@@ -312,14 +312,9 @@ class DataBinding:
         self.remote_lora_dropdown = None
         self.selected_checkpoint = None  # checkpoint object
         self.cloud_api_dropdown = None
-        self.update_suggest_prompts_checkbox = None
-        self.suggest_prompts_enabled = True
+        self.suggest_prompts_checkbox = None
 
         self.initialized = False
-
-    def update_suggest_prompts_enabled(self, v):
-        print("[cloud-inference] set_suggest_prompts_enabled", v)
-        self.suggest_prompts_enabled = v
 
     def set_remote_inference_enabled(self, v):
         print("[cloud-inference] set_remote_inference_enabled", v)
@@ -333,7 +328,7 @@ class DataBinding:
             return v, "Generate (cloud)"
         return v, "Generate"
 
-    def update_selected_model(self, name_index: int, selected_loras: list[str], prompt: str, neg_prompt: str):
+    def update_selected_model(self, name_index: int, selected_loras: list[str], suggest_prompts_enabled, prompt: str, neg_prompt: str):
         selected: api.StableDiffusionModel = self.remote_sd_models[name_index]
         selected_checkpoint: api.StableDiffusionModel = None
         selected_checkpoint_index: int = 0
@@ -359,14 +354,14 @@ class DataBinding:
         neg_prompt = neg_prompt
 
         if selected.example is not None:
-            if selected.example.prompts is not None and self.suggest_prompts_enabled:
+            if selected.example.prompts is not None and suggest_prompts_enabled:
                 prompt = selected.example.prompts
                 prompt = prompt.replace("\n", "")
                 if len(selected_loras) > 0:
                     prompt = self._update_lora_in_prompt(
                         selected.example.prompts, selected_loras)
                 prompt = prompt.replace("\n", "")
-            if selected.example.neg_prompt is not None and self.suggest_prompts_enabled:
+            if selected.example.neg_prompt is not None and suggest_prompts_enabled:
                 neg_prompt = selected.example.neg_prompt
 
         return gr.Dropdown.update(
@@ -501,14 +496,10 @@ class CloudInferenceScript(scripts.Script):
                             inputs=[_binding.txt2img_enable_remote_inference],
                             outputs=[_binding.enable_remote_inference])
 
-                _binding.enable_suggest_prompts_checkbox = gr.Checkbox(
-                    value=_binding.suggest_prompts_enabled,
+                _binding.suggest_prompts_checkbox = gr.Checkbox(
+                    value=True,
                     label="Suggest Prompts",
-                    elem_id="enable_suggest_prompts_checkbox")
-                _binding.enable_suggest_prompts_checkbox.change(
-                    fn=lambda x: _binding.update_suggest_prompts_enabled(x),
-                    inputs=[_binding.enable_suggest_prompts_checkbox],
-                )
+                    elem_id="suggest_prompts_enabled")
 
             with gr.Row():
                 # api provider
@@ -558,7 +549,6 @@ class CloudInferenceScript(scripts.Script):
 
             with gr.Column():
                 _binding.remote_lora_dropdown = gr.Dropdown(
-                    value=_binding.get_selected_model_loras,
                     choices=_binding.get_model_loras_cohices(),
                     label="Lora",
                     elem_id="remote_lora_dropdown", multiselect=True)
@@ -568,6 +558,7 @@ class CloudInferenceScript(scripts.Script):
                     inputs=[
                         _binding.remote_model_dropdown,
                         _binding.remote_lora_dropdown,
+                        _binding.suggest_prompts_checkbox,
                         _binding.txt2img_prompt, _binding.txt2img_neg_prompt
                     ],
                     outputs=[
