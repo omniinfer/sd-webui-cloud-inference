@@ -1,12 +1,11 @@
 import modules.scripts as scripts
+import html
 import sys
 import gradio as gr
 import importlib
 
-from modules import images, script_callbacks, processing, ui
-from modules import images, script_callbacks
-from modules import processing, shared
-from modules.processing import Processed, StableDiffusionProcessingImg2Img, StableDiffusionProcessingTxt2Img
+from modules import images, script_callbacks, errors, processing, ui, shared
+from modules.processing import Processed, StableDiffusionProcessingImg2Img, StableDiffusionProcessingTxt2Img, StableDiffusionProcessing
 from modules.shared import opts, state, prompt_styles
 from extension import api
 
@@ -14,6 +13,8 @@ from inspect import getmembers, isfunction
 import random
 import traceback
 import os
+
+from modules import ui_extra_networks, extra_networks, paths, ui_extra_networks_user_metadata
 
 DEMO_MODE = os.getenv("CLOUD_INFERENCE_DEMO_MODE")
 
@@ -38,7 +39,7 @@ class _Proxy(object):
         xyz_grid = find_module("xyz_grid.py, xy_grid.py")
         if xyz_grid:
 
-            def xyz_model_apply(p, opt, v):
+            def xyz_model_apply(p: StableDiffusionProcessing, opt, v):
                 m = _binding.choice_to_model(opt)
                 if m.kind == 'lora':
                     p._remote_model_name = m.dependency_model_name
@@ -119,7 +120,7 @@ class _Proxy(object):
         elif isinstance(p, StableDiffusionProcessingImg2Img):
             generated_images = api.get_instance().img2img(p)
         else:
-            return self._fn(p)
+            return self._fn(*args, **kwargs)
 
         # compatible with old version
         if hasattr(p, 'setup_prompts'):
@@ -182,9 +183,7 @@ class _Proxy(object):
                                   opts.samples_format,
                                   info=infotext(),
                                   p=p)
-        if (
-                opts.return_grid or opts.grid_save
-        ) and not p.do_not_save_grid and not unwanted_grid_because_of_img_count:
+        if (opts.return_grid or opts.grid_save) and not p.do_not_save_grid and not unwanted_grid_because_of_img_count:
             grid = images.image_grid(generated_images, p.batch_size)
 
             if opts.return_grid:
@@ -245,52 +244,27 @@ def create_infotext(p,
             p)
 
     generation_params = {
-        "Steps":
-        p.steps,
-        "Sampler":
-        p.sampler_name,
-        "CFG scale":
-        p.cfg_scale,
-        "Image CFG scale":
-        getattr(p, 'image_cfg_scale', None),
-        "Seed":
-        all_seeds[index],
-        "Face restoration":
-        (opts.face_restoration_model if p.restore_faces else None),
-        "Size":
-        f"{p.width}x{p.height}",
-        "Model":
-        (None if not opts.add_model_name_to_info or not p._remote_model_name
-         else p._remote_model_name.replace(',', '').replace(':', '')),
-        "Variation seed":
-        (None if p.subseed_strength == 0 else all_subseeds[index]),
-        "Variation seed strength":
-        (None if p.subseed_strength == 0 else p.subseed_strength),
-        "Seed resize from":
-        (None if p.seed_resize_from_w == 0 or p.seed_resize_from_h == 0 else
-         f"{p.seed_resize_from_w}x{p.seed_resize_from_h}"),
-        "Denoising strength":
-        getattr(p, 'denoising_strength', None),
-        "Conditional mask weight":
-        getattr(p, "inpainting_mask_weight", opts.inpainting_mask_weight)
-        if p.is_using_inpainting_conditioning else None,
-        "Clip skip":
-        None if clip_skip <= 1 else clip_skip,
-        "ENSD":
-        getattr(opts, 'eta_noise_seed_delta', None) if uses_ensd else None,
-        "Token merging ratio":
-        None if token_merging_ratio == 0 else token_merging_ratio,
-        "Token merging ratio hr":
-        None if not enable_hr or token_merging_ratio_hr == 0 else
-        token_merging_ratio_hr,
-        "Init image hash":
-        getattr(p, 'init_img_hash', None),
-        "RNG":
-        None,
-        "NGMS":
-        None,
-        "Version":
-        None,
+        "Steps": p.steps,
+        "Sampler": p.sampler_name,
+        "CFG scale": p.cfg_scale,
+        "Image CFG scale": getattr(p, 'image_cfg_scale', None),
+        "Seed": all_seeds[index],
+        "Face restoration": (opts.face_restoration_model if p.restore_faces else None),
+        "Size": f"{p.width}x{p.height}",
+        "Model": (None if not opts.add_model_name_to_info or not p._remote_model_name else p._remote_model_name.replace(',', '').replace(':', '')),
+        "Variation seed": (None if p.subseed_strength == 0 else all_subseeds[index]),
+        "Variation seed strength": (None if p.subseed_strength == 0 else p.subseed_strength),
+        "Seed resize from": (None if p.seed_resize_from_w == 0 or p.seed_resize_from_h == 0 else f"{p.seed_resize_from_w}x{p.seed_resize_from_h}"),
+        "Denoising strength": getattr(p, 'denoising_strength', None),
+        "Conditional mask weight": getattr(p, "inpainting_mask_weight", opts.inpainting_mask_weight) if p.is_using_inpainting_conditioning else None,
+        "Clip skip": None if clip_skip <= 1 else clip_skip,
+        "ENSD": getattr(opts, 'eta_noise_seed_delta', None) if uses_ensd else None,
+        "Token merging ratio": None if token_merging_ratio == 0 else token_merging_ratio,
+        "Token merging ratio hr": None if not enable_hr or token_merging_ratio_hr == 0 else token_merging_ratio_hr,
+        "Init image hash": getattr(p, 'init_img_hash', None),
+        "RNG": None,
+        "NGMS": None,
+        "Version": None,
         **p.extra_generation_params,
     }
 
@@ -544,14 +518,10 @@ class CloudInferenceScript(scripts.Script):
                 # remote checkpoint
                 if not _binding.initialized:
                     try:
-                        _binding.remote_sd_models = api.get_instance(
-                        ).list_models()
-                        if _binding.remote_sd_models is None or len(
-                                _binding.remote_sd_models) == 0:
+                        _binding.remote_sd_models = api.get_instance().list_models()
+                        if _binding.remote_sd_models is None or len(_binding.remote_sd_models) == 0:
                             api.get_instance().refresh_models()
-                            _binding.remote_sd_models = api.get_instance(
-                            ).list_models()
-
+                            _binding.remote_sd_models = api.get_instance().list_models()
                     except Exception as e:
                         print(traceback.format_exc())
 
@@ -662,3 +632,148 @@ def on_after_component_callback(component, **_kwargs):
 
 
 script_callbacks.on_after_component(on_after_component_callback)
+
+
+class CloudModelMetadataEditor(ui_extra_networks_user_metadata.UserMetadataEditor):
+    def __init__(self, ui, tabname, page):
+        super().__init__(ui, tabname, page)
+
+    def get_metadata_table(self, name):
+        return []
+
+    def like_model(self, button_like, name):
+        current_liked = False if button_like == "Unlike" else True
+        selected_model = None
+        for model in _binding.remote_sd_models:
+            if os.path.splitext(model.name)[0] == name:
+                selected_model = model
+                break
+
+        if current_liked and "favorite" not in selected_model.user_tags:
+            selected_model.user_tags.append("favorite")
+        elif not current_liked and "favorite" in selected_model.user_tags:
+            selected_model.user_tags.remove("favorite")
+
+        print(selected_model.user_tags)
+
+        return gr.update(value="Unlike" if current_liked else "Like")
+
+    def get_card_html(self, name):
+        item = self.page.items.get(name, {})
+
+        preview_url = item.get("preview", None)
+
+        if not preview_url:
+            item["preview"] = None
+
+        if preview_url:
+            preview = f'''
+            <div class='card standalone-card-preview'>
+                <img src="{html.escape(preview_url)}" class="preview">
+            </div>
+            '''
+        else:
+            preview = "<div class='card standalone-card-preview'></div>"
+
+        return preview
+
+    def create_default_editor_elems(self):
+        with gr.Row():
+            with gr.Column(scale=2):
+                self.edit_name = gr.HTML(elem_classes="extra-network-name")
+                self.edit_description = gr.Textbox(
+                    label="Description", lines=4, visible=False)
+                self.html_filedata = gr.HTML()
+
+                self.create_extra_default_items_in_left_column()
+                self.html_preview = gr.HTML()
+
+    def put_values_into_components(self, name):
+        print("aaaaaaaaaa", name)
+        selected_model = None
+        for model in _binding.remote_sd_models:
+            if os.path.splitext(model.name)[0] == name:
+                selected_model = model
+                break
+
+        return html.escape(name), self.get_card_html(name), "Unlike" if "favorite" in selected_model.user_tags else "Like"
+
+    def create_default_buttons(self):
+        with gr.Row(elem_classes="edit-user-metadata-buttons"):
+            self.button_cancel = gr.Button('Cancel')
+            self.button_like = gr.Button('Like', variant='primary')
+            self.button_replace_preview = gr.Button(
+                'Replace preview', variant='primary', visible=False)
+            self.button_save = gr.Button(
+                'Save', variant='primary', visible=False)
+
+        self.html_status = gr.HTML(elem_classes="edit-user-metadata-status")
+
+        self.button_cancel.click(fn=None, _js="closePopup")
+
+    def create_editor(self):
+        self.create_default_editor_elems()
+
+        self.edit_notes = gr.TextArea(label='Notes', lines=4, visible=False)
+
+        self.create_default_buttons()
+
+        self.button_edit\
+            .click(fn=self.put_values_into_components, inputs=[self.edit_name_input], outputs=[self.edit_name, self.html_preview, self.button_like])\
+            .then(fn=lambda: gr.update(visible=True), inputs=[], outputs=[self.box])
+
+        # self.setup_save_handler(self.button_save, self.save_user_metadata, [
+        # self.edit_description, self.edit_notes])
+        self.button_like.click(fn=self.like_model, inputs=[
+                               self.button_like, self.edit_name_input], outputs=[self.button_like])
+
+
+def a(*args, **kwargs):
+    class CloudModelPage(ui_extra_networks.ExtraNetworksPage):
+        def __init__(self):
+            super().__init__('Cloud Models')
+
+        def read_user_metadata(self, item):
+            pass
+
+        def refresh(self):
+            return
+
+        def create_html_for_item(self, item, tabname):
+            if not item.get("onclick", None):
+                item["onclick"] = '"' + html.escape(
+                    f"""extraNetworksEditUserMetadata(event, {ui_extra_networks.quote_js(tabname)}, {ui_extra_networks.quote_js(self.id_page)}, {ui_extra_networks.quote_js(item['name'])})""") + '"'
+            return super().create_html_for_item(item, tabname)
+
+        def list_items(self):
+            # extdir = os.path.split(os.path.dirname(__file__))[0]
+            # os.makedirs(model_cache_dir, exist_ok=True)
+
+            for model in _binding.remote_sd_models:
+                name = os.path.splitext(model.name)[0]
+                item = {
+                    "name": name,
+                    "description": name,
+                    "metadata": {},
+                    "search_term": name,
+                    "prompt": "",
+                    "local_preview": "",
+                    # "onclick": "gradioApp().getElementById('remote_model_dropdown');"
+                }
+                if model.example:
+                    item["prompt"] = "{}".format(
+                        ui_extra_networks.quote_js(model.example.prompts))
+                    item["preview"] = model.example.preview
+
+                yield item
+
+        def allowed_directories_for_previews(self):
+            return [v for v in [] if v is not None]
+
+        def create_user_metadata_editor(self, ui, tabname):
+            return CloudModelMetadataEditor(ui, tabname, self)
+
+    ui_extra_networks.register_page(CloudModelPage())
+
+
+script_callbacks.on_before_ui(a)

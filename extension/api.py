@@ -51,13 +51,18 @@ class StableDiffusionModel(object):
                  tags=None,
                  child=None,
                  example=None,
-                 dependency_model_name=None):
+                 dependency_model_name=None,
+                 user_tags=None):
         self.kind = kind  # checkpoint, lora
         self.name = name
         self.rating = rating
         self.tags = tags
         if self.tags is None:
             self.tags = []
+
+        self.user_tags = user_tags
+        if self.user_tags is None:
+            self.user_tags = []
 
         self.child = child
         if self.child is None:
@@ -102,7 +107,9 @@ class StableDiffusionModelExample(object):
                  cfg_scale=None,
                  seed=None,
                  height=None,
-                 width=None):
+                 width=None,
+                 preview=None,
+                 ):
         self.prompts = prompts
         self.neg_prompt = neg_prompt
         self.sampler_name = sampler_name
@@ -111,6 +118,7 @@ class StableDiffusionModelExample(object):
         self.seed = seed
         self.height = height
         self.width = width
+        self.preview = preview
 
 
 class OmniinferAPI(BaseAPI):
@@ -336,7 +344,8 @@ class OmniinferAPI(BaseAPI):
 
         attempts = 300
 
-        global_progress = 0  # queue(0-20), generating(20-90), downloading(90-100)
+        # queue(0-20), generating(20-90), downloading(90-100)
+        global_progress = 0
         while attempts > 0:
             if state.skipped or state.interrupted:
                 raise Exception("Interrupted")
@@ -507,9 +516,7 @@ class OmniinferAPI(BaseAPI):
 
         controlnet_batchs = []
         for s in p.scripts.alwayson_scripts:
-
             if s.filename.endswith("controlnet.py"):
-
                 script_args = p.script_args[s.args_from:s.args_to]
                 image = ""
 
@@ -597,15 +604,19 @@ class OmniinferAPI(BaseAPI):
             if len(item.get('civitai_images',
                             [])) > 0 and item['civitai_images'][0]['meta'].get(
                                 'prompt') is not None:
-                first_image = item['civitai_images'][0]['meta']
+                first_image = item['civitai_images'][0]
+                first_image_meta = item['civitai_images'][0]['meta']
                 model.example = StableDiffusionModelExample(
-                    prompts=first_image['prompt'],
-                    neg_prompt=first_image.get('negative_prompt', None),
-                    width=first_image.get('width', None),
-                    height=first_image.get('height', None),
-                    sampler_name=first_image.get('sampler_name', None),
-                    cfg_scale=first_image.get('cfg_scale', None),
-                    seed=first_image.get('seed', None))
+                    prompts=first_image_meta['prompt'],
+                    neg_prompt=first_image_meta.get('negative_prompt', None),
+                    width=first_image_meta.get('width', None),
+                    height=first_image_meta.get('height', None),
+                    sampler_name=first_image_meta.get('sampler_name', None),
+                    cfg_scale=first_image_meta.get('cfg_scale', None),
+                    seed=first_image_meta.get('seed', None),
+                    preview=first_image.get('url', None)
+                )
+
             if item['type'] == 'lora':
                 civitai_dependency_model_name = item.get(
                     'civitai_dependency_model_name', None)
