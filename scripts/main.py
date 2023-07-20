@@ -7,7 +7,6 @@ import importlib
 from modules import images, script_callbacks, errors, processing, ui, shared
 from modules.processing import Processed, StableDiffusionProcessingImg2Img, StableDiffusionProcessingTxt2Img, StableDiffusionProcessing
 from modules.shared import opts, state, prompt_styles
-from modules.ui_common import ToolButton, refresh_symbol
 from extension import api
 
 from inspect import getmembers, isfunction
