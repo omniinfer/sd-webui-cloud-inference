@@ -2,7 +2,7 @@ import requests
 import time
 import io
 import base64
-from modules import sd_samplers
+from modules import sd_samplers, processing
 from modules.shared import opts, state
 from PIL import Image
 from multiprocessing.pool import ThreadPool
@@ -10,7 +10,6 @@ import random
 import os
 import copy
 import json
-from types import SimpleNamespace
 from .utils import image_to_base64, read_image_files
 from .version import __version__
 
@@ -26,16 +25,19 @@ def _user_agent(model_name=None):
 
 class BaseAPI(object):
 
-    def txt2img(self, p) -> list[Image.Image]:
+    def txt2img(self,
+                p: processing.StableDiffusionProcessing):
         pass
 
-    def img2img(self, p) -> list[Image.Image]:
+    def img2img(
+            self, p: processing.StableDiffusionProcessingTxt2Img
+    ):
         pass
 
-    def list_models() -> list[str]:
+    def list_models():
         pass
 
-    def refresh_models() -> list[str]:
+    def refresh_models():
         pass
 
 
@@ -48,13 +50,18 @@ class StableDiffusionModel(object):
                  tags=None,
                  child=None,
                  example=None,
-                 dependency_model_name=None):
+                 dependency_model_name=None,
+                 user_tags=None):
         self.kind = kind  # checkpoint, lora
         self.name = name
         self.rating = rating
         self.tags = tags
         if self.tags is None:
             self.tags = []
+
+        self.user_tags = user_tags
+        if self.user_tags is None:
+            self.user_tags = []
 
         self.child = child
         if self.child is None:
@@ -77,7 +84,7 @@ class StableDiffusionModel(object):
 
         if self.tags is not None and len(self.tags) != 0:
             n += "[{}] ".format(self.tags[0])
-        return n + self.name
+        return n + os.path.splitext(self.name)[0]
 
     def to_json(self):
         d = {}
@@ -99,7 +106,9 @@ class StableDiffusionModelExample(object):
                  cfg_scale=None,
                  seed=None,
                  height=None,
-                 width=None):
+                 width=None,
+                 preview=None,
+                 ):
         self.prompts = prompts
         self.neg_prompt = neg_prompt
         self.sampler_name = sampler_name
@@ -108,6 +117,7 @@ class StableDiffusionModelExample(object):
         self.seed = seed
         self.height = height
         self.width = width
+        self.preview = preview
 
 
 class OmniinferAPI(BaseAPI):
@@ -261,7 +271,9 @@ class OmniinferAPI(BaseAPI):
 
     def _img2img(self, model_name, prompts, neg_prompts, sampler_name,
                  batch_size, steps, n_iter, cfg_scale, seed, height, width,
-                 restore_faces, denoising_strength, init_images,
+                 restore_faces, denoising_strength, mask_blur_x, mask_blur_y,
+                 inpainting_fill, inpaint_full_res, inpaint_full_res_padding,
+                 inpainting_mask_invert, initial_noise_multiplier, init_images,
                  controlnet_args):
 
         if self._token is None:
@@ -286,6 +298,13 @@ class OmniinferAPI(BaseAPI):
             "model_name": model_name,
             "restore_faces": restore_faces,
             "denoising_strength": denoising_strength,
+            "mask_blur_x": mask_blur_x,
+            "mask_blur_y": mask_blur_y,
+            "inpainting_fill": inpainting_fill,
+            "inpaint_full_res": inpaint_full_res,
+            "inpaint_full_res_padding": inpaint_full_res_padding,
+            "inpainting_mask_invert": inpainting_mask_invert,
+            "initial_noise_multiplier": initial_noise_multiplier,
             "init_images": init_images,
             "controlnet_units": controlnet_args
         }
@@ -297,12 +316,21 @@ class OmniinferAPI(BaseAPI):
             "User-Agent": _user_agent(model_name)
         }
 
+        print(
+            '[cloud-inference] call api txt2img: payload: {}'.format({
+                key: value
+                for key, value in payload.items() if key != "controlnet_units"
+            }), )
+
         res = requests.post("http://api.omniinfer.io/v2/img2img",
                             json=payload,
                             headers=headers,
                             params={"key": self._token})
 
-        json_data = res.json()
+        try:
+            json_data = res.json()
+        except Exception:
+            raise Exception("Request failed: {}".format(res.text))
 
         return json_data['data']['task_id']
 
@@ -315,7 +343,8 @@ class OmniinferAPI(BaseAPI):
 
         attempts = 300
 
-        global_progress = 0  # queue(0-20), generating(20-90), downloading(90-100)
+        # queue(0-20), generating(20-90), downloading(90-100)
+        global_progress = 0
         while attempts > 0:
             if state.skipped or state.interrupted:
                 raise Exception("Interrupted")
@@ -359,14 +388,18 @@ class OmniinferAPI(BaseAPI):
 
     def img2img(
         self,
-        p,
+        p: processing.StableDiffusionProcessingImg2Img,
     ):
 
         controlnet_batchs = self.check_controlnet_arg(p)
 
+        live_previews_image_format = "png"
+        if getattr(opts, 'live_previews_image_format', None):
+            live_previews_image_format = opts.live_previews_image_format
+
         images_base64 = []
         for i in p.init_images:
-            if opts.live_previews_image_format == "png":
+            if live_previews_image_format == "png":
                 # using optimize for large images takes an enormous amount of time
                 if max(*i.size) <= 256:
                     save_kwargs = {"optimize": True}
@@ -377,9 +410,7 @@ class OmniinferAPI(BaseAPI):
                 save_kwargs = {}
 
             buffered = io.BytesIO()
-            i.save(buffered,
-                   format=opts.live_previews_image_format,
-                   **save_kwargs)
+            i.save(buffered, format=live_previews_image_format, **save_kwargs)
             base64_image = base64.b64encode(
                 buffered.getvalue()).decode('ascii')
             images_base64.append(base64_image)
@@ -389,42 +420,59 @@ class OmniinferAPI(BaseAPI):
             for c in controlnet_batchs:
                 img_urls.extend(
                     self._wait_task_completed(
-                        self._img2img(model_name=p._remote_model_name,
-                                      prompts=p.prompt,
-                                      neg_prompts=p.negative_prompt,
-                                      sampler_name=p.sampler_name,
-                                      batch_size=p.batch_size,
-                                      steps=p.steps,
-                                      n_iter=p.n_iter,
-                                      cfg_scale=p.cfg_scale,
-                                      seed=p.seed,
-                                      height=p.height,
-                                      width=p.width,
-                                      restore_faces=p.restore_faces,
-                                      denoising_strength=p.denoising_strength,
-                                      init_images=images_base64,
-                                      controlnet_args=c)))
+                        self._img2img(
+                            model_name=p._remote_model_name,
+                            prompts=p.prompt,
+                            neg_prompts=p.negative_prompt,
+                            sampler_name=p.sampler_name,
+                            batch_size=p.batch_size,
+                            steps=p.steps,
+                            n_iter=p.n_iter,
+                            cfg_scale=p.cfg_scale,
+                            seed=p.seed,
+                            height=p.height,
+                            width=p.width,
+                            restore_faces=p.restore_faces,
+                            denoising_strength=p.denoising_strength,
+                            mask_blur_x=p.mask_blur_x,
+                            mask_blur_y=p.mask_blur_y,
+                            inpaint_full_res=bool(p.inpaint_full_res),
+                            inpaint_full_res_padding=p.
+                            inpaint_full_res_padding,
+                            inpainting_fill=p.inpainting_fill,
+                            inpainting_mask_invert=p.inpainting_mask_invert,
+                            initial_noise_multiplier=p.initial_noise_multiplier,
+                            init_images=images_base64,
+                            controlnet_args=c)))
         else:
             img_urls.extend(
                 self._wait_task_completed(
-                    self._img2img(model_name=p._remote_model_name,
-                                  prompts=p.prompt,
-                                  neg_prompts=p.negative_prompt,
-                                  sampler_name=p.sampler_name,
-                                  batch_size=p.batch_size,
-                                  steps=p.steps,
-                                  n_iter=p.n_iter,
-                                  cfg_scale=p.cfg_scale,
-                                  seed=p.seed,
-                                  height=p.height,
-                                  width=p.width,
-                                  restore_faces=p.restore_faces,
-                                  denoising_strength=p.denoising_strength,
-                                  init_images=images_base64,
-                                  controlnet_args=[])))
+                    self._img2img(
+                        model_name=p._remote_model_name,
+                        prompts=p.prompt,
+                        neg_prompts=p.negative_prompt,
+                        sampler_name=p.sampler_name,
+                        batch_size=p.batch_size,
+                        steps=p.steps,
+                        n_iter=p.n_iter,
+                        cfg_scale=p.cfg_scale,
+                        seed=p.seed,
+                        height=p.height,
+                        width=p.width,
+                        restore_faces=p.restore_faces,
+                        denoising_strength=p.denoising_strength,
+                        mask_blur_x=p.mask_blur_x,
+                        mask_blur_y=p.mask_blur_y,
+                        inpaint_full_res=bool(p.inpaint_full_res),
+                        inpaint_full_res_padding=p.inpaint_full_res_padding,
+                        inpainting_fill=p.inpainting_fill,
+                        inpainting_mask_invert=p.inpainting_mask_invert,
+                        initial_noise_multiplier=p.initial_noise_multiplier,
+                        init_images=images_base64,
+                        controlnet_args=[])))
         return retrieve_images(img_urls)
 
-    def txt2img(self, p):
+    def txt2img(self, p: processing.StableDiffusionProcessingTxt2Img):
         controlnet_batchs = self.check_controlnet_arg(p)
 
         img_urls = []
@@ -467,9 +515,7 @@ class OmniinferAPI(BaseAPI):
 
         controlnet_batchs = []
         for s in p.scripts.alwayson_scripts:
-
             if s.filename.endswith("controlnet.py"):
-
                 script_args = p.script_args[s.args_from:s.args_to]
                 image = ""
 
@@ -495,17 +541,17 @@ class OmniinferAPI(BaseAPI):
 
                     if getattr(c.input_mode, 'value', '') == "simple":
                         base64_str = ""
-                        if script_args[0].image is not None:
+                        if script_args[0].image:
                             image = Image.fromarray(
                                 script_args[0].image["image"])
                             base64_str = image_to_base64(image)
 
-                        controlnet_arg['input_image'] = base64_str
+                            controlnet_arg['input_image'] = base64_str
 
-                        if len(controlnet_batchs) <= 1:
-                            controlnet_batchs.append([])
+                            if len(controlnet_batchs) <= 1:
+                                controlnet_batchs.append([])
 
-                        controlnet_batchs[0].append(controlnet_arg)
+                            controlnet_batchs[0].append(controlnet_arg)
 
                     elif getattr(c.input_mode, 'value', '') == "batch":
                         if c.batch_images != "" and c.batch_images != None:
@@ -557,15 +603,19 @@ class OmniinferAPI(BaseAPI):
             if len(item.get('civitai_images',
                             [])) > 0 and item['civitai_images'][0]['meta'].get(
                                 'prompt') is not None:
-                first_image = item['civitai_images'][0]['meta']
+                first_image = item['civitai_images'][0]
+                first_image_meta = item['civitai_images'][0]['meta']
                 model.example = StableDiffusionModelExample(
-                    prompts=first_image['prompt'],
-                    neg_prompt=first_image.get('negative_prompt', None),
-                    width=first_image.get('width', None),
-                    height=first_image.get('height', None),
-                    sampler_name=first_image.get('sampler_name', None),
-                    cfg_scale=first_image.get('cfg_scale', None),
-                    seed=first_image.get('seed', None))
+                    prompts=first_image_meta['prompt'],
+                    neg_prompt=first_image_meta.get('negative_prompt', None),
+                    width=first_image_meta.get('width', None),
+                    height=first_image_meta.get('height', None),
+                    sampler_name=first_image_meta.get('sampler_name', None),
+                    cfg_scale=first_image_meta.get('cfg_scale', None),
+                    seed=first_image_meta.get('seed', None),
+                    preview=first_image.get('url', None)
+                )
+
             if item['type'] == 'lora':
                 civitai_dependency_model_name = item.get(
                     'civitai_dependency_model_name', None)
@@ -583,21 +633,28 @@ class OmniinferAPI(BaseAPI):
                     m[model.dependency_model_name].append_child(model.name)
 
         self.__class__.update_models_to_config(sd_models)
+        self._models = sd_models
         return sd_models
 
 
-def retrieve_images(img_urls) -> list[Image.Image]:
-
+def retrieve_images(img_urls):
     def _download(img_url):
-        response = requests.get(img_url)
-        return Image.open(io.BytesIO(response.content))
+        attempts = 5
+        while attempts > 0:
+            try:
+                response = requests.get(img_url, timeout=2)
+                return Image.open(io.BytesIO(response.content))
+            except Exception:
+                print("[cloud-inference] failed to download image, retrying...")
+            attempts -= 1
+        return None
 
     pool = ThreadPool()
     applied = []
     for img_url in img_urls:
         applied.append(pool.apply_async(_download, (img_url, )))
     ret = [r.get() for r in applied]
-    return ret
+    return [_ for _ in ret if _ is not None]
 
 
 _instance = None
