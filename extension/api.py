@@ -80,7 +80,7 @@ class StableDiffusionModel(object):
 
         if self.tags is not None and len(self.tags) != 0:
             n += "[{}] ".format(self.tags[0])
-        return n + self.name
+        return n + os.path.splitext(self.name)[0]
 
     def to_json(self):
         d = {}
@@ -535,17 +535,17 @@ class OmniinferAPI(BaseAPI):
 
                     if getattr(c.input_mode, 'value', '') == "simple":
                         base64_str = ""
-                        if script_args[0].image is not None:
+                        if script_args[0].image:
                             image = Image.fromarray(
                                 script_args[0].image["image"])
                             base64_str = image_to_base64(image)
 
-                        controlnet_arg['input_image'] = base64_str
+                            controlnet_arg['input_image'] = base64_str
 
-                        if len(controlnet_batchs) <= 1:
-                            controlnet_batchs.append([])
+                            if len(controlnet_batchs) <= 1:
+                                controlnet_batchs.append([])
 
-                        controlnet_batchs[0].append(controlnet_arg)
+                            controlnet_batchs[0].append(controlnet_arg)
 
                     elif getattr(c.input_mode, 'value', '') == "batch":
                         if c.batch_images != "" and c.batch_images != None:

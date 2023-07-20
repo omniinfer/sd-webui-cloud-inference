@@ -42,7 +42,8 @@ class _Proxy(object):
                 m = _binding.choice_to_model(opt)
                 if m.kind == 'lora':
                     p._remote_model_name = m.dependency_model_name
-                    p.prompt = _binding._add_lora_in_prompt(p.prompt, m.name)
+                    p.prompt = _binding._update_lora_in_prompt(
+                        p.prompt, m.name)
                 else:
                     p._remote_model_name = m.name
 
@@ -58,7 +59,7 @@ class _Proxy(object):
                                     apply=xyz_model_apply,
                                     confirm=xyz_model_confirm,
                                     format_value=xyz_model_format,
-                                    choices=_binding.get_model_choices))
+                                    choices=_binding.get_model_ckpt_choices))
 
     def monkey_patch(self):
         if self._patched:
@@ -333,7 +334,7 @@ class DataBinding:
         self.img2img_generate = None
         self.remote_sd_models = None
         self.remote_model_dropdown = None
-        self.remote_lora_checkbox_group = None
+        self.remote_lora_dropdown = None
         self.selected_checkpoint = None  # checkpoint object
         self.cloud_api_dropdown = None
         self.update_suggest_prompts_checkbox = None
@@ -357,12 +358,10 @@ class DataBinding:
             return v, "Generate (cloud)"
         return v, "Generate"
 
-    def update_selected_model(self, name_index: int, prompt: str,
-                              neg_prompt: str):
+    def update_selected_model(self, name_index: int, selected_loras: list[str], prompt: str, neg_prompt: str):
         selected: api.StableDiffusionModel = self.remote_sd_models[name_index]
         selected_checkpoint: api.StableDiffusionModel = None
         selected_checkpoint_index: int = 0
-        selected_loras = []
 
         # if selected model is lora, then we need to get base model of it and set selected model to base model
         if selected.kind == 'lora':
@@ -389,42 +388,42 @@ class DataBinding:
                 prompt = selected.example.prompts
                 prompt = prompt.replace("\n", "")
                 if len(selected_loras) > 0:
-                    prompt = self._add_lora_in_prompt(selected.example.prompts,
-                                                      selected_loras)
+                    prompt = self._update_lora_in_prompt(
+                        selected.example.prompts, selected_loras)
                 prompt = prompt.replace("\n", "")
             if selected.example.neg_prompt is not None and self.suggest_prompts_enabled:
                 neg_prompt = selected.example.neg_prompt
 
         return gr.Dropdown.update(
             choices=[_.display_name for _ in self.remote_sd_models],
-            value=selected_checkpoint.display_name), gr.update(
-                choices=[_ for _ in selected_checkpoint.child],
-                value=selected_loras), gr.update(value=prompt), gr.update(
-                    value=neg_prompt)
+            value=selected_checkpoint.display_name), gr.update(value=selected_loras), gr.update(value=prompt), gr.update(value=neg_prompt)
 
     @staticmethod
-    def _add_lora_in_prompt(prompt, lora_names, weight=1):
+    def _update_lora_in_prompt(prompt, lora_names, weight=1):
         prompt = prompt
         add_lora_prompts = []
 
+        prompt_split = [_.strip() for _ in prompt.split(',')]
+
+        # add
         for lora_name in lora_names:
             if '<lora:{}:'.format(lora_name) not in prompt:
                 add_lora_prompts.append("<lora:{}:{}>".format(
                     lora_name, weight))
+        # delete
+        for prompt_item in prompt_split:
+            if prompt_item.startswith("<lora:") and prompt_item.endswith(">"):
+                lora_name = prompt_item.split(":")[1]
+                if lora_name not in lora_names:
+                    prompt_split.remove(prompt_item)
 
-        if len(add_lora_prompts) > 0 and (not prompt.endswith(", ")
-                                          and not prompt.endswith(",")):
-            prompt = prompt + ", "
+        prompt_split.extend(add_lora_prompts)
 
-        return prompt + ", ".join(add_lora_prompts)
-
-    @staticmethod
-    def _del_lora_in_prompt(self, prompt, lora_name):
-        pass
+        return ", ".join(prompt_split)
 
     def update_selected_lora(self, lora_names, prompt):
         print("[cloud-inference] set_selected_lora", lora_names)
-        return gr.update(value=self._add_lora_in_prompt(prompt, lora_names))
+        return gr.update(value=self._update_lora_in_prompt(prompt, lora_names))
 
     def update_cloud_api(self, v):
         # TODO: support multiple cloud api provider
@@ -439,12 +438,19 @@ class DataBinding:
                     ret.append(lora_name)
         return ret
 
-    def choice_to_model(self, choice):
+    def get_model_loras_cohices(self, base=None):
+        ret = []
+        for model in self.remote_sd_models:
+            if model.kind == 'lora':
+                ret.append(model.name)
+        return ret
+
+    def choice_to_model(self, choice):  # display_name -> sd_name
         for model in self.remote_sd_models:
             if model.display_name == choice:
                 return model
 
-    def get_model_choices(self):
+    def get_model_ckpt_choices(self):
         return [_.display_name for _ in self.remote_sd_models]
 
 
@@ -570,8 +576,8 @@ class CloudInferenceScript(scripts.Script):
                     _binding.initialized = True
 
                 _binding.remote_model_dropdown = gr.Dropdown(
-                    label="Cloud Models (ckpt/lora)",
-                    choices=_binding.get_model_choices(),
+                    label="Quick Select (Checkpoint/Lora)",
+                    choices=_binding.get_model_ckpt_choices(),
                     value=lambda: _binding.selected_checkpoint.display_name,
                     type="index",
                     elem_id="remote_model_dropdown")
@@ -589,27 +595,28 @@ class CloudInferenceScript(scripts.Script):
                                          _refresh, "Refresh")
 
             with gr.Column():
-                # remote lora
-                _binding.remote_lora_checkbox_group = gr.CheckboxGroup(
-                    _binding.get_selected_model_loras(),
+                _binding.remote_lora_dropdown = gr.Dropdown(
+                    value=_binding.get_selected_model_loras,
+                    choices=_binding.get_model_loras_cohices(),
                     label="Lora",
-                    elem_id="remote_lora_dropdown")
+                    elem_id="remote_lora_dropdown", multiselect=True)
 
                 _binding.remote_model_dropdown.select(
                     fn=_binding.update_selected_model,
                     inputs=[
                         _binding.remote_model_dropdown,
+                        _binding.remote_lora_dropdown,
                         _binding.txt2img_prompt, _binding.txt2img_neg_prompt
                     ],
                     outputs=[
                         _binding.remote_model_dropdown,
-                        _binding.remote_lora_checkbox_group,
+                        _binding.remote_lora_dropdown,
                         _binding.txt2img_prompt, _binding.txt2img_neg_prompt
                     ])
-                _binding.remote_lora_checkbox_group.select(
+                _binding.remote_lora_dropdown.select(
                     fn=lambda x, y: _binding.update_selected_lora(x, y),
                     inputs=[
-                        _binding.remote_lora_checkbox_group,
+                        _binding.remote_lora_dropdown,
                         _binding.txt2img_prompt
                     ],
                     outputs=_binding.txt2img_prompt,
@@ -625,11 +632,11 @@ class CloudInferenceScript(scripts.Script):
             return [
                 _binding.remote_model_dropdown,
                 enable_remote_inference,
-                _binding.remote_lora_checkbox_group,
+                _binding.remote_lora_dropdown,
             ]
         return [
             _binding.remote_model_dropdown,
-            _binding.remote_lora_checkbox_group,
+            _binding.remote_lora_dropdown,
         ]
 
 
