@@ -7,7 +7,6 @@ import importlib
 from modules import images, script_callbacks, errors, processing, ui, shared
 from modules.processing import Processed, StableDiffusionProcessingImg2Img, StableDiffusionProcessingTxt2Img, StableDiffusionProcessing
 from modules.shared import opts, state, prompt_styles
-from modules.ui_common import ToolButton, refresh_symbol
 from extension import api
 
 from inspect import getmembers, isfunction
@@ -17,6 +16,25 @@ import os
 
 
 DEMO_MODE = os.getenv("CLOUD_INFERENCE_DEMO_MODE")
+
+
+refresh_symbol = '\U0001f504'  # 🔄
+
+
+class FormComponent:
+    def get_expected_parent(self):
+        return gr.components.Form
+
+
+class ToolButton(FormComponent, gr.Button):
+    """Small button with single emoji as text, fits inside gradio forms"""
+
+    def __init__(self, *args, **kwargs):
+        classes = kwargs.pop("elem_classes", [])
+        super().__init__(*args, elem_classes=["tool", *classes], **kwargs)
+
+    def get_block_name(self):
+        return "button"
 
 
 class _Proxy(object):
