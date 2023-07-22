@@ -24,14 +24,10 @@ def _user_agent(model_name=None):
 
 
 class BaseAPI(object):
-
-    def txt2img(self,
-                p: processing.StableDiffusionProcessing):
+    def txt2img(self, p: processing.StableDiffusionProcessingTxt2Img):
         pass
 
-    def img2img(
-            self, p: processing.StableDiffusionProcessingTxt2Img
-    ):
+    def img2img(self, p: processing.StableDiffusionProcessingImg2Img):
         pass
 
     def list_models():
@@ -42,7 +38,6 @@ class BaseAPI(object):
 
 
 class StableDiffusionModel(object):
-
     def __init__(self,
                  kind,
                  name,
@@ -234,16 +229,15 @@ class OmniinferAPI(BaseAPI):
             "seed": int(seed) or -1,
             "height": height or 512,
             "width": width or 512,
-            # "model_name": "AnythingV5_v5PrtRE.safetensors",
             "model_name": model_name,
             "controlnet_units": controlnet_args
         }
 
-        print(
-            '[cloud-inference] call api txt2img: payload: {}'.format({
-                key: value
-                for key, value in payload.items() if key != "controlnet_units"
-            }), )
+        # print(
+        #     '[cloud-inference] call api txt2img: payload: {}'.format({
+        #         key: value
+        #         for key, value in payload.items() if key != "controlnet_units"
+        #     }), )
 
         headers = {
             "accept": "application/json",
@@ -273,8 +267,8 @@ class OmniinferAPI(BaseAPI):
                  batch_size, steps, n_iter, cfg_scale, seed, height, width,
                  restore_faces, denoising_strength, mask_blur_x, mask_blur_y,
                  inpainting_fill, inpaint_full_res, inpaint_full_res_padding,
-                 inpainting_mask_invert, initial_noise_multiplier, init_images,
-                 controlnet_args):
+                 inpainting_mask_invert, initial_noise_multiplier, init_images, 
+                 controlnet_units):
 
         if self._token is None:
             raise Exception(
@@ -306,7 +300,7 @@ class OmniinferAPI(BaseAPI):
             "inpainting_mask_invert": inpainting_mask_invert,
             "initial_noise_multiplier": initial_noise_multiplier,
             "init_images": init_images,
-            "controlnet_units": controlnet_args
+            "controlnet_units": controlnet_units
         }
         headers = {
             "accept": "application/json",
@@ -316,11 +310,11 @@ class OmniinferAPI(BaseAPI):
             "User-Agent": _user_agent(model_name)
         }
 
-        print(
-            '[cloud-inference] call api txt2img: payload: {}'.format({
-                key: value
-                for key, value in payload.items() if key != "controlnet_units"
-            }), )
+       #  print(
+       #      '[cloud-inference] call api txt2img: payload: {}'.format({
+       #          key: value
+       #          for key, value in payload.items() if key != "controlnet_units"
+       #      }), )
 
         res = requests.post("http://api.omniinfer.io/v2/img2img",
                             json=payload,
@@ -390,8 +384,7 @@ class OmniinferAPI(BaseAPI):
         self,
         p: processing.StableDiffusionProcessingImg2Img,
     ):
-
-        controlnet_batchs = self.check_controlnet_arg(p)
+        controlnet_batchs = get_controlnet_arg(p)
 
         live_previews_image_format = "png"
         if getattr(opts, 'live_previews_image_format', None):
@@ -443,7 +436,7 @@ class OmniinferAPI(BaseAPI):
                             inpainting_mask_invert=p.inpainting_mask_invert,
                             initial_noise_multiplier=p.initial_noise_multiplier,
                             init_images=images_base64,
-                            controlnet_args=c)))
+                            controlnet_units=c)))
         else:
             img_urls.extend(
                 self._wait_task_completed(
@@ -469,11 +462,11 @@ class OmniinferAPI(BaseAPI):
                         inpainting_mask_invert=p.inpainting_mask_invert,
                         initial_noise_multiplier=p.initial_noise_multiplier,
                         init_images=images_base64,
-                        controlnet_args=[])))
+                        controlnet_units=[])))
         return retrieve_images(img_urls)
 
     def txt2img(self, p: processing.StableDiffusionProcessingTxt2Img):
-        controlnet_batchs = self.check_controlnet_arg(p)
+        controlnet_batchs = get_controlnet_arg(p)
 
         img_urls = []
         if len(controlnet_batchs) > 0:
@@ -510,68 +503,6 @@ class OmniinferAPI(BaseAPI):
 
         state.textinfo = "downloading images..."
         return retrieve_images(img_urls)
-
-    def check_controlnet_arg(self, p):
-
-        controlnet_batchs = []
-        for s in p.scripts.alwayson_scripts:
-            if s.filename.endswith("controlnet.py"):
-                script_args = p.script_args[s.args_from:s.args_to]
-                image = ""
-
-                for c in script_args:
-
-                    if c.enabled == False:
-                        continue
-
-                    controlnet_arg = {}
-                    controlnet_arg['weight'] = c.weight
-                    controlnet_arg[
-                        'model'] = "control_v11f1e_sd15_tile"  # TODO
-                    controlnet_arg['module'] = c.module
-
-                    if c.control_mode == "Balanced":
-                        controlnet_arg['control_mode'] = 0
-                    elif c.control_mode == "My prompt is more important":
-                        controlnet_arg['control_mode'] = 1
-                    elif c.control_mode == "ControlNet is more important":
-                        controlnet_arg['control_mode'] = 2
-                    else:
-                        return
-
-                    if getattr(c.input_mode, 'value', '') == "simple":
-                        base64_str = ""
-                        if script_args[0].image:
-                            image = Image.fromarray(
-                                script_args[0].image["image"])
-                            base64_str = image_to_base64(image)
-
-                            controlnet_arg['input_image'] = base64_str
-
-                            if len(controlnet_batchs) <= 1:
-                                controlnet_batchs.append([])
-
-                            controlnet_batchs[0].append(controlnet_arg)
-
-                    elif getattr(c.input_mode, 'value', '') == "batch":
-                        if c.batch_images != "" and c.batch_images != None:
-                            images = read_image_files(c.batch_images)
-                            for i, img in enumerate(images):
-                                if len(controlnet_batchs) <= i:
-                                    controlnet_batchs.append([])
-
-                                controlnet_new_arg = copy.deepcopy(
-                                    controlnet_arg)
-                                controlnet_new_arg['input_image'] = img
-
-                                controlnet_batchs[i].append(controlnet_new_arg)
-                        else:
-                            print("batch_images is empty")
-
-                    else:
-                        print("input_mode is empty")
-
-        return controlnet_batchs
 
     def list_models(self):
         if self._models is None or len(self._models) == 0:
@@ -637,6 +568,87 @@ class OmniinferAPI(BaseAPI):
         return sd_models
 
 
+_instance = None
+
+
+def get_instance():
+    global _instance
+    if _instance is not None:
+        return _instance
+    _instance = OmniinferAPI.load_from_config()
+    return _instance
+
+
+def refresh_instance():
+    global _instance
+    _instance = OmniinferAPI.load_from_config()
+    return _instance
+
+
+def get_visible_extension_args(p: processing.StableDiffusionProcessing, name):
+    for s in p.scripts.alwayson_scripts:
+        if s.name == name:
+            return p.script_args[s.args_from:s.args_to]
+    return []
+
+
+def get_controlnet_arg(p: processing.StableDiffusionProcessing):
+    controlnet_batchs = []
+    controlnet_units = get_visible_extension_args(p, 'controlnet')
+    for c in controlnet_units:
+        if c.enabled == False:
+            continue
+
+        controlnet_arg = {}
+        controlnet_arg['weight'] = c.weight
+        controlnet_arg['model'] = "control_v11f1e_sd15_tile"  # TODO
+        controlnet_arg['module'] = c.module
+
+        if c.control_mode == "Balanced":
+            controlnet_arg['control_mode'] = 0
+        elif c.control_mode == "My prompt is more important":
+            controlnet_arg['control_mode'] = 1
+        elif c.control_mode == "ControlNet is more important":
+            controlnet_arg['control_mode'] = 2
+        else:
+            return
+
+        if getattr(c.input_mode, 'value', '') == "simple":
+            base64_str = ""
+            if controlnet_units[0].image:
+                if "mask" in controlnet_units[0].image:
+                    mask = Image.fromarray(
+                        controlnet_units[0].image["mask"])
+                    controlnet_arg['mask'] = image_to_base64(mask)
+
+                controlnet_arg['input_image'] = image_to_base64(
+                    Image.fromarray(controlnet_units[0].image["image"]))
+
+                if len(controlnet_batchs) <= 1:
+                    controlnet_batchs.append([])
+
+                controlnet_batchs[0].append(controlnet_arg)
+
+        elif getattr(c.input_mode, 'value', '') == "batch":
+            if c.batch_images != "" and c.batch_images != None:
+                images = read_image_files(c.batch_images)
+                for i, img in enumerate(images):
+                    if len(controlnet_batchs) <= i:
+                        controlnet_batchs.append([])
+
+                    controlnet_new_arg = copy.deepcopy(controlnet_arg)
+                    controlnet_new_arg['input_image'] = img
+
+                    controlnet_batchs[i].append(controlnet_new_arg)
+            else:
+                print("batch_images is empty")
+
+        else:
+            print("input_mode is empty")
+
+    return controlnet_batchs
+
+
 def retrieve_images(img_urls):
     def _download(img_url):
         attempts = 5
@@ -655,20 +667,3 @@ def retrieve_images(img_urls):
         applied.append(pool.apply_async(_download, (img_url, )))
     ret = [r.get() for r in applied]
     return [_ for _ in ret if _ is not None]
-
-
-_instance = None
-
-
-def get_instance():
-    global _instance
-    if _instance is not None:
-        return _instance
-    _instance = OmniinferAPI.load_from_config()
-    return _instance
-
-
-def refresh_instance():
-    global _instance
-    _instance = OmniinferAPI.load_from_config()
-    return _instance

@@ -3,7 +3,6 @@ import base64
 import os
 
 
-
 def image_to_base64(image):
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
@@ -13,10 +12,11 @@ def image_to_base64(image):
 
     return base64_str
 
+
 def read_image_files(folder_path):
     image_extensions = [".png", ".jpg", ".jpeg", ".webp"]
     image_files = []
-    
+
     for file_name in os.listdir(folder_path):
         file_ext_lower = os.path.splitext(file_name)[1].lower()
         if file_ext_lower in image_extensions:
