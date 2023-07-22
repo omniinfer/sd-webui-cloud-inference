@@ -229,16 +229,15 @@ class OmniinferAPI(BaseAPI):
             "seed": int(seed) or -1,
             "height": height or 512,
             "width": width or 512,
-            # "model_name": "AnythingV5_v5PrtRE.safetensors",
             "model_name": model_name,
             "controlnet_units": controlnet_args
         }
 
-        print(
-            '[cloud-inference] call api txt2img: payload: {}'.format({
-                key: value
-                for key, value in payload.items() if key != "controlnet_units"
-            }), )
+        # print(
+        #     '[cloud-inference] call api txt2img: payload: {}'.format({
+        #         key: value
+        #         for key, value in payload.items() if key != "controlnet_units"
+        #     }), )
 
         headers = {
             "accept": "application/json",
@@ -268,7 +267,7 @@ class OmniinferAPI(BaseAPI):
                  batch_size, steps, n_iter, cfg_scale, seed, height, width,
                  restore_faces, denoising_strength, mask_blur_x, mask_blur_y,
                  inpainting_fill, inpaint_full_res, inpaint_full_res_padding,
-                 inpainting_mask_invert, initial_noise_multiplier, init_images,
+                 inpainting_mask_invert, initial_noise_multiplier, init_images, 
                  controlnet_units):
 
         if self._token is None:
@@ -311,11 +310,11 @@ class OmniinferAPI(BaseAPI):
             "User-Agent": _user_agent(model_name)
         }
 
-        print(
-            '[cloud-inference] call api txt2img: payload: {}'.format({
-                key: value
-                for key, value in payload.items() if key != "controlnet_units"
-            }), )
+       #  print(
+       #      '[cloud-inference] call api txt2img: payload: {}'.format({
+       #          key: value
+       #          for key, value in payload.items() if key != "controlnet_units"
+       #      }), )
 
         res = requests.post("http://api.omniinfer.io/v2/img2img",
                             json=payload,
@@ -569,202 +568,8 @@ class OmniinferAPI(BaseAPI):
         return sd_models
 
 
-class StableDiffusionAPI(BaseAPI):
-    def __init__(self, endpoint):
-        self._endpoint = endpoint
-        self._models = []
-        self._session = requests.Session()
-        self._session.headers.update({'User-Agent': _user_agent()})
-
-    def txt2img(self, p: processing.StableDiffusionProcessingTxt2Img):
-        controlnet_batchs = get_controlnet_arg(p)
-
-        def _req(p: processing.StableDiffusionProcessingTxt2Img, controlnet_units):
-            req = {
-                "enable_hr": p.enable_hr,
-                "denoising_strength": p.denoising_strength,
-                "hr_scale": p.hr_scale,
-                "hr_upscaler": p.hr_upscaler,
-                "hr_second_pass_steps": p.hr_second_pass_steps,
-                "hr_resize_x": p.hr_resize_x,
-                "hr_resize_y": p.hr_resize_y,
-                "hr_sampler_name": p.hr_sampler_name,
-                "hr_prompt": p.hr_prompt,
-                "hr_negative_prompt": p.hr_negative_prompt,
-                "prompt": p.prompt,
-                "styles": p.styles,
-                "seed": p.seed,
-                "subseed": p.subseed,
-                "subseed_strength": p.subseed_strength,
-                "seed_resize_from_h": p.seed_resize_from_h,
-                "seed_resize_from_w": p.seed_resize_from_w,
-                "sampler_name": p.sampler_name,
-                "batch_size": p.batch_size,
-                "n_iter": p.n_iter,
-                "steps": p.steps,
-                "cfg_scale": p.cfg_scale,
-                "width": p.width,
-                "height": p.height,
-                "restore_faces": p.restore_faces,
-                "tiling": p.tiling,
-                "do_not_save_samples": p.do_not_save_samples,
-                "do_not_save_grid": p.do_not_save_grid,
-                "negative_prompt": p.negative_prompt,
-                "eta": p.eta,
-                "s_min_uncond": p.s_min_uncond,
-                "s_churn": p.s_churn,
-                "s_tmax": p.s_tmax,
-                "s_tmin": p.s_tmin,
-                "s_noise": p.s_noise,
-                "override_settings": p.override_settings,
-                "override_settings_restore_afterwards": p.override_settings_restore_afterwards,
-                "send_images": True,
-            }
-
-            req["override_settings"]["sd_model_checkpoint"] = p._remote_model_name
-            if len(controlnet_units) > 0:
-                req["controlnet_units"] = controlnet_units
-
-            res = self._session.post(
-                self._endpoint + "/sdapi/v1/txt2img", json=req)
-            if res.status_code >= 400:
-                raise Exception("Request failed: {}".format(res.text))
-
-            images = res.json()["images"]
-            ret = []
-            for image in images:
-                ret.append(Image.open(io.BytesIO(base64.b64decode(image))))
-            return ret
-
-        ret = []
-        if len(controlnet_batchs) > 0:
-            for c in controlnet_batchs:
-                ret.extend(_req(p, c))
-        else:
-            ret.extend(_req(p, []))
-        return ret
-
-    def img2img(self, p: processing.StableDiffusionProcessingImg2Img):
-        controlnet_batchs = get_controlnet_arg(p)
-
-        def _req(p: processing.StableDiffusionProcessingImg2Img, controlnet_units):
-            req = {
-                "init_images": [image_to_base64(_) for _ in p.init_images],
-                "mask": image_to_base64(p.image_mask),
-                "resize_mode": p.resize_mode,
-                "denoising_strength": p.denoising_strength,
-                "image_cfg_scale": p.image_cfg_scale,
-                "mask_blur": p.mask_blur_x,
-                "inpainting_fill": p.inpainting_fill,
-                "inpaint_full_res": p.inpaint_full_res,
-                "inpaint_full_res_padding": p.inpaint_full_res_padding,
-                "inpainting_mask_invert": p.inpainting_mask_invert,
-                "initial_noise_multiplier": p.initial_noise_multiplier,
-                "prompt": p.prompt,
-                "styles": p.styles,
-                "seed": p.seed,
-                "subseed": p.subseed,
-                "subseed_strength": p.subseed_strength,
-                "seed_resize_from_h": p.seed_resize_from_h,
-                "seed_resize_from_w": p.seed_resize_from_w,
-                "sampler_name": p.sampler_name,
-                "batch_size": p.batch_size,
-                "n_iter": p.n_iter,
-                "steps": p.steps,
-                "cfg_scale": p.cfg_scale,
-                "width": p.width,
-                "height": p.height,
-                "restore_faces": p.restore_faces,
-                "tiling": p.tiling,
-                "negative_prompt": p.negative_prompt,
-                "eta": p.eta,
-                "s_min_uncond": p.s_min_uncond,
-                "s_churn": p.s_churn,
-                "s_tmax": p.s_tmax,
-                "s_tmin": p.s_tmin,
-                "s_noise": p.s_noise,
-                "override_settings": p.override_settings,
-                "override_settings_restore_afterwards": p.override_settings_restore_afterwards,
-                "send_images": True,
-            }
-            print(req)
-            if len(controlnet_units) > 0:
-                req["controlnet_units"] = controlnet_units
-
-            ret = []
-            res = self._session.post(
-                self._endpoint + "/sdapi/v1/img2img", json=req)
-            if res.status_code >= 400:
-                raise Exception("Request failed: {}".format(res.text))
-
-            for image in res.json()["images"]:
-                ret.append(Image.open(io.BytesIO(base64.b64decode(image))))
-            return ret
-
-        ret = []
-        if len(controlnet_batchs) > 0:
-            for c in controlnet_batchs:
-                ret.extend(_req(p, c))
-        else:
-            ret.extend(_req(p, []))
-
-        return ret
-
-    def list_models(self):
-        if self._models is None or len(self._models) == 0:
-            self.refresh_models()
-        return sorted(self._models, key=lambda x: x.rating, reverse=True)
-
-    def refresh_models(self):
-        res = requests.get(self._endpoint + "/sdapi/v1/sd-models")
-        if res.status_code >= 400:
-            return []
-        ret = []
-        for item in res.json():
-
-            ret.append(StableDiffusionModel(
-                name=os.path.basename(item["filename"]),
-                kind="ckpt",
-            ))
-        self._models = ret
-        return ret
-
-
-def retrieve_images(img_urls):
-    def _download(img_url):
-        attempts = 5
-        while attempts > 0:
-            try:
-                response = requests.get(img_url, timeout=2)
-                return Image.open(io.BytesIO(response.content))
-            except Exception:
-                print("[cloud-inference] failed to download image, retrying...")
-            attempts -= 1
-        return None
-
-    pool = ThreadPool()
-    applied = []
-    for img_url in img_urls:
-        applied.append(pool.apply_async(_download, (img_url, )))
-    ret = [r.get() for r in applied]
-    return [_ for _ in ret if _ is not None]
-
-
 _instance = None
 
-
-# def get_instance():
-#     global _instance
-#     if _instance is not None:
-#         return _instance
-#     _instance = StableDiffusionAPI("http://192.168.105.152:7860")
-#     return _instance
-
-
-# def refresh_instance():
-#     global _instance
-#     _instance = StableDiffusionAPI("http://192.168.105.152:7860")
-#     return _instance
 
 def get_instance():
     global _instance
@@ -796,8 +601,7 @@ def get_controlnet_arg(p: processing.StableDiffusionProcessing):
 
         controlnet_arg = {}
         controlnet_arg['weight'] = c.weight
-        controlnet_arg[
-            'model'] = "control_v11f1e_sd15_tile"  # TODO
+        controlnet_arg['model'] = "control_v11f1e_sd15_tile"  # TODO
         controlnet_arg['module'] = c.module
 
         if c.control_mode == "Balanced":
@@ -843,3 +647,23 @@ def get_controlnet_arg(p: processing.StableDiffusionProcessing):
             print("input_mode is empty")
 
     return controlnet_batchs
+
+
+def retrieve_images(img_urls):
+    def _download(img_url):
+        attempts = 5
+        while attempts > 0:
+            try:
+                response = requests.get(img_url, timeout=2)
+                return Image.open(io.BytesIO(response.content))
+            except Exception:
+                print("[cloud-inference] failed to download image, retrying...")
+            attempts -= 1
+        return None
+
+    pool = ThreadPool()
+    applied = []
+    for img_url in img_urls:
+        applied.append(pool.apply_async(_download, (img_url, )))
+    ret = [r.get() for r in applied]
+    return [_ for _ in ret if _ is not None]
