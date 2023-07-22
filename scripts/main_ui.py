@@ -313,7 +313,7 @@ def on_after_component_callback(component, **_kwargs):
             not _binding.initialized:
 
         sync_cloud_model(_binding.txt2img_cloud_inference_model_dropdown,
-                           _binding.img2img_cloud_inference_model_dropdown)
+                         _binding.img2img_cloud_inference_model_dropdown)
 
         sync_two_component(_binding.txt2img_cloud_inference_suggest_prompts_checkbox,
                            _binding.img2img_cloud_inference_suggest_prompts_checkbox, 'change')
@@ -332,11 +332,12 @@ def sync_two_component(a, b, event_name):
     getattr(a, event_name)(fn=mirror, inputs=[a, b], outputs=[a, b])
     getattr(b, event_name)(fn=mirror, inputs=[b, a], outputs=[b, a])
 
+
 def sync_cloud_model(a, b):
     def mirror(a, b):
         if a != b:
             b = a
-        
+
         target_model = _binding.remote_sd_models[b]
         # TODO
         if target_model.kind == 'lora' and target_model.dependency_model_name != None:
@@ -344,11 +345,12 @@ def sync_cloud_model(a, b):
                 if model.name == target_model.dependency_model_name:
                     b = model.display_name
                     break
-            
-        return a, b
+        elif target_model.kind == 'checkpoint':
+            b = target_model.display_name
+
+        return _binding.remote_sd_models[a].display_name, b
     getattr(a, "select")(fn=mirror, inputs=[a, b], outputs=[a, b])
     getattr(b, "select")(fn=mirror, inputs=[b, a], outputs=[b, a])
-
 
 
 def sync_cloud_inference_checkbox(txt2img_checkbox, img2img_checkbox, txt2img_generate_button, img2img_generate_button):
