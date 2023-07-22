@@ -185,7 +185,7 @@ class CloudInferenceScript(scripts.Script):
                     value=lambda: shared.opts.data.get(
                         "cloud_inference_default_enabled", False),
                     visible=not shared.opts.data.get(
-                        "cloud_inference_checkbox_hidden", True),
+                        "cloud_inference_checkbox_hidden", False),
                     elem_id="{}_cloud_inference_checkbox".format(tabname))
 
                 cloud_inference_suggest_prompts_checkbox = gr.Checkbox(
