@@ -1,5 +1,5 @@
 import modules.scripts as scripts
-import html
+import os
 import sys
 import gradio as gr
 import importlib
@@ -7,20 +7,49 @@ import importlib
 from modules import images, script_callbacks, errors, processing, ui, shared
 from modules.processing import Processed, StableDiffusionProcessingImg2Img, StableDiffusionProcessingTxt2Img, StableDiffusionProcessing
 from modules.shared import opts, state, prompt_styles
+from collections import OrderedDict
 from extension import api
 
-from inspect import getmembers, isfunction
+from inspect import getmembers, isfunction, ismodule
 import random
-import traceback
-import os
 
 
-class _Proxy(object):
+class _HijackManager(object):
 
     def __init__(self, fn):
         self._fn = fn
-        self._patched = False
+        self._hijacked = False
         self._binding = None
+
+        self.hijack_map = {}
+
+    def hijack_one(self, name, new_fn):
+        tmp = name.rsplit('.', 1)
+        if len(tmp) < 2:
+            raise Exception('invalid module.func name: {}'.format(name))
+
+        module_name, func_name = tmp
+        old_fn = _hijack_func(module_name, func_name, new_fn)
+        self.hijack_map[name] = {
+            'old': old_fn,
+            'new': new_fn,
+        }
+
+        print('[cloud-inference] hijack {}, old: <{}>, new: <{}>'.format(
+            name, old_fn.__module__ + '.' + old_fn.__name__, new_fn.__module__ + '.' + new_fn.__name__))
+
+    def hijack_all(self, *args, **kwargs):
+        if self._hijacked:
+            return
+
+        self.hijack_one('modules.processing.process_images',
+                        self._hijack_process_images)
+
+        self.hijack_one(
+            'extensions.sd-webui-controlnet.scripts.global_state.update_cn_models', self._hijack_update_cn_models)
+
+        self._apply_xyz()
+        print('[cloud-inference] hijack finished')
 
     def _apply_xyz(self):
 
@@ -59,38 +88,33 @@ class _Proxy(object):
                                     format_value=xyz_model_format,
                                     choices=self._binding.get_model_ckpt_choices))
 
-    def monkey_patch(self):
-        if self._patched:
-            return
-
-        processing.process_images = self
-
-        keys = list(sys.modules.keys())
-        for name in keys:
-            # if (name.startswith('modules')
-            # or name.startswith('scripts')) and name != 'modules.processing':
-            if name.startswith('modules') and name != 'modules.processing':
-                if 'process_images' in dict(
-                        getmembers(sys.modules[name], isfunction)).keys():
-                    print('[cloud-inference] reloading', name)
-                    importlib.reload(sys.modules[name])
+    def _hijack_update_cn_models(self):
+        if not self._binding.remote_inference_enabled:
+            return self.hijack_map['extensions.sd-webui-controlnet.scripts.global_state.update_cn_models']['old']()
 
         from modules.scripts import scripts_data
         for script in scripts_data:
-            if hasattr(script.module, 'process_images'):
-                script.module.process_images = self
-            if hasattr(
-                    script.module, 'processing'
-            ) and script.module.processing.__name__ == 'modules.processing':
-                script.module.processing.process_images = self
+            if script.module.__name__ == 'controlnet.py':
+                script.module.global_state.cn_models = OrderedDict({
+                    'None': None,
+                    "[cloud] control_v11e_sd15_ip2p": None,
+                    "[cloud] control_v11e_sd15_shuffle": None,
+                    "[cloud] control_v11f1e_sd15_tile": None,
+                    "[cloud] control_v11f1p_sd15_depth": None,
+                    "[cloud] control_v11p_sd15_canny": None,
+                    "[cloud] control_v11p_sd15_inpaint": None,
+                    "[cloud] control_v11p_sd15_lineart": None,
+                    "[cloud] control_v11p_sd15_mlsd": None,
+                    "[cloud] control_v11p_sd15_normalbae": None,
+                    "[cloud] control_v11p_sd15_openpose": None,
+                    "[cloud] control_v11p_sd15_scribble": None,
+                    "[cloud] control_v11p_sd15_seg": None,
+                    "[cloud] control_v11p_sd15_softedge": None,
+                    "[cloud] control_v11p_sd15s2_lineart_anime": None,
+                })
+                break
 
-        self._apply_xyz()
-        print('[cloud-inference] monkey patched')
-
-        self._patched = True
-
-    def __call__(self, *args, **kwargs) -> Processed:
-
+    def _hijack_process_images(self, *args, **kwargs) -> Processed:
         if len(args) > 0 and isinstance(args[0],
                                         processing.StableDiffusionProcessing):
             p = args[0]
@@ -98,9 +122,10 @@ class _Proxy(object):
             raise Exception(
                 'process_images: first argument must be a processing object')
 
-        remote_inference_enabled, selected_model_index = get_visible_extension_args(p, 'cloud inference')
+        remote_inference_enabled, selected_model_index = get_visible_extension_args(
+            p, 'cloud inference')
         if not remote_inference_enabled:
-            return self._fn(*args, **kwargs)
+            return self.hijack_map['modules.processing.process_images']['old'](*args, **kwargs)
 
         # random seed locally if not specified
         if p.seed == -1:
@@ -300,4 +325,76 @@ def get_visible_extension_args(p: processing.StableDiffusionProcessing, name):
     return []
 
 
-_proxy = _Proxy(processing.process_images)
+def _hijack_func(module_name, func_name, new_func):
+    # case 1: import module, replace function, return old function
+    module = importlib.import_module(module_name)
+    old_func = getattr(module, func_name)
+    setattr(module, func_name, new_func)
+
+    # case 2: from module import func_name
+    keys = list(sys.modules.keys())
+    for name in keys:
+        # if (name.startswith('modules')
+        # or name.startswith('scripts')) and name != 'modules.processing':
+        if name.startswith('modules') and name != module_name:
+            members = getmembers(sys.modules[name], isfunction)
+            if func_name in members:
+                func_fullname = '{}.{}'.format(
+                    members[func_name].__module__, members[func_name].__name__)
+                if func_fullname == '{}.{}'.format(module_name, func_name):
+                    print('[cloud-inference] reloading', name)
+                    importlib.reload(sys.modules[name])
+
+    # TODO: case 3: from module import func_name as func_name_alias
+
+    # case: replace webui extensinos scripts functions
+    extension_mode = False
+    extension_prefix = ""
+    if module_name.startswith('extensions.'):
+        tmp1, tmp2, extension_suffix = module_name.split(
+            '.', 2)  # scripts internal module name
+        extension_prefix = "{}.{}".format(tmp1, tmp2)
+        module_name = "modules.{}".format(extension_suffix)
+        extension_mode = True
+
+    # from modules.processing import process_images
+    search_names = [module_name]
+    search_names.append(func_name)
+    tmp = module_name.split(".")
+    if len(tmp) >= 2:
+        search_names.append(".".join(tmp[-2:]))  # import modules.processing
+        search_names.append(tmp[-1])  # from modules import processing
+        # from modules import processing.process_images
+        search_names.append("{}.{}".format(tmp[-1], func_name))
+
+    # script changes, webui scripts are loaded independently.
+
+    from modules.scripts import scripts_data
+    for script in scripts_data:
+        if extension_mode and os.path.join(*extension_prefix.split('.')) not in script.basedir:
+            continue
+
+        for name in search_names:
+            if name in script.module.__dict__:
+                obj = script.module.__dict__[name]
+                replace = False
+                if ismodule(obj) and obj.__file__ == module.__file__:
+                    replace = True
+                elif isfunction(obj) and obj.__module__ == module_name:  # ??
+                    replace = True
+
+                if replace:
+                    if name == func_name:
+                        print(
+                            '[cloud-inference] reloading {} - {}'.format(script.module.__name__, func_name))
+                        setattr(script.module, name, new_func)
+                    else:
+                        print(
+                            '[cloud-inference] reloading {} - {}'.format(script.module.__name__, name))
+                        t = getattr(script.module, name)
+                        setattr(t, func_name, new_func)
+                        setattr(script.module, name, t)  # ?
+    return old_func
+
+
+_hijack_manager = _HijackManager(processing.process_images)

@@ -267,7 +267,7 @@ class OmniinferAPI(BaseAPI):
                  batch_size, steps, n_iter, cfg_scale, seed, height, width,
                  restore_faces, denoising_strength, mask_blur_x, mask_blur_y,
                  inpainting_fill, inpaint_full_res, inpaint_full_res_padding,
-                 inpainting_mask_invert, initial_noise_multiplier, init_images, 
+                 inpainting_mask_invert, initial_noise_multiplier, init_images,
                  controlnet_units):
 
         if self._token is None:
@@ -601,7 +601,7 @@ def get_controlnet_arg(p: processing.StableDiffusionProcessing):
 
         controlnet_arg = {}
         controlnet_arg['weight'] = c.weight
-        controlnet_arg['model'] = "control_v11f1e_sd15_tile"  # TODO
+        controlnet_arg['model'] = c.model.strip("[cloud] ")
         controlnet_arg['module'] = c.module
 
         if c.control_mode == "Balanced":
@@ -614,15 +614,14 @@ def get_controlnet_arg(p: processing.StableDiffusionProcessing):
             return
 
         if getattr(c.input_mode, 'value', '') == "simple":
-            base64_str = ""
-            if controlnet_units[0].image:
-                if "mask" in controlnet_units[0].image:
+            if c.image:
+                if "mask" in c.image:
                     mask = Image.fromarray(
-                        controlnet_units[0].image["mask"])
+                        c.image["mask"])
                     controlnet_arg['mask'] = image_to_base64(mask)
 
                 controlnet_arg['input_image'] = image_to_base64(
-                    Image.fromarray(controlnet_units[0].image["image"]))
+                    Image.fromarray(c.image["image"]))
 
                 if len(controlnet_batchs) <= 1:
                     controlnet_batchs.append([])

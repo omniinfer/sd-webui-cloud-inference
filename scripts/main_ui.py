@@ -18,6 +18,7 @@ DEMO_MODE = os.getenv("CLOUD_INFERENCE_DEMO_MODE")
 
 
 refresh_symbol = '\U0001f504'  # 🔄
+favorite_symbol = '\U0001f49e'  # 💞
 
 
 class FormComponent:
@@ -57,13 +58,12 @@ class DataBinding:
         self.txt2img_cloud_inference_suggest_prompts_checkbox = None
         self.img2img_cloud_inference_suggest_prompts_checkbox = None
 
-        # self.cloud_api_dropdown = None
-
+        self.remote_inference_enabled = False
         self.remote_sd_models = None
         self.default_remote_model = None
         self.initialized = False
 
-    def update_selected_model(self, name_index: int, selected_loras: list[str], suggest_prompts_enabled, prompt: str, neg_prompt: str):
+    def on_selected_model(self, name_index: int, selected_loras: list[str], suggest_prompts_enabled, prompt: str, neg_prompt: str):
         selected: api.StableDiffusionModel = self.remote_sd_models[name_index]
         selected_checkpoint: api.StableDiffusionModel = None
         selected_checkpoint_index: int = 0
@@ -177,13 +177,16 @@ class CloudInferenceScript(scripts.Script):
             _binding.default_remote_model = random.choice(
                 _binding.remote_sd_models[:top_n]).display_name if len(_binding.remote_sd_models) > 0 else None
 
+        default_enabled = shared.opts.data.get("cloud_inference_default_enabled", False)
+        if default_enabled:
+            _binding.remote_inference_enabled = True
+            
         # define ui layouts
         with gr.Accordion('Cloud Inference', open=True):
             with gr.Row():
                 cloud_inference_checkbox = gr.Checkbox(
                     label="Enable Cloud Inference",
-                    value=lambda: shared.opts.data.get(
-                        "cloud_inference_default_enabled", False),
+                    value=lambda: default_enabled,
                     visible=not shared.opts.data.get(
                         "cloud_inference_checkbox_hidden", False),
                     elem_id="{}_cloud_inference_checkbox".format(tabname))
@@ -210,6 +213,8 @@ class CloudInferenceScript(scripts.Script):
 
                 refresh_button = ToolButton(
                     value=refresh_symbol, elem_id="{}_cloud_inference_refersh_button".format(tabname))
+                # favorite_button = ToolButton(
+                #     value=favorite_symbol, elem_id="{}_cloud_inference_favorite_button".format(tabname))
 
             with gr.Row():
                 cloud_inference_lora_dropdown = gr.Dropdown(
@@ -220,7 +225,7 @@ class CloudInferenceScript(scripts.Script):
             # define events of components.
             # auto fill prompt after select model
             cloud_inference_model_dropdown.select(
-                fn=_binding.update_selected_model,
+                fn=_binding.on_selected_model,
                 inputs=[
                     cloud_inference_model_dropdown,
                     cloud_inference_lora_dropdown,
@@ -249,7 +254,8 @@ class CloudInferenceScript(scripts.Script):
 
             def _model_refresh():
                 api.get_instance().refresh_models()
-                _binding.remote_sd_models = api.get_instance().list_models()
+                _binding.remote_sd_models = api.get_instance().list_models() # TODO: fix name_index out of range
+                
                 return gr.update(choices=[_.display_name for _ in _binding.remote_sd_models]), gr.update(choices=[_.name for _ in _binding.remote_sd_models if _.kind == 'lora'])
 
             refresh_button.click(
@@ -264,9 +270,8 @@ class CloudInferenceScript(scripts.Script):
 _binding = None
 if _binding is None:
     _binding = DataBinding()
-    from scripts.proxy import _proxy
-    _proxy._binding = _binding
-    _proxy.monkey_patch()
+    from scripts.hijack import _hijack_manager
+    _hijack_manager._binding = _binding
 
 
 print('Loading extension: sd-webui-cloud-inference')
@@ -362,7 +367,11 @@ def sync_cloud_inference_checkbox(txt2img_checkbox, img2img_checkbox, txt2img_ge
 
         button_text = "Generate"
         if enabled:
+            _binding.remote_inference_enabled = True
             button_text = "Generate (cloud)"
+        else:
+            _binding.remote_inference_enabled = False
+
         return source, target, button_text, button_text
 
     txt2img_checkbox.change(fn=mirror, inputs=[txt2img_checkbox, img2img_checkbox], outputs=[
@@ -381,3 +390,4 @@ def on_ui_settings():
 
 script_callbacks.on_after_component(on_after_component_callback)
 script_callbacks.on_ui_settings(on_ui_settings)
+script_callbacks.on_app_started(_hijack_manager.hijack_all)
