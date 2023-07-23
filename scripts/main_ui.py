@@ -177,10 +177,11 @@ class CloudInferenceScript(scripts.Script):
             _binding.default_remote_model = random.choice(
                 _binding.remote_sd_models[:top_n]).display_name if len(_binding.remote_sd_models) > 0 else None
 
-        default_enabled = shared.opts.data.get("cloud_inference_default_enabled", False)
+        default_enabled = shared.opts.data.get(
+            "cloud_inference_default_enabled", False)
         if default_enabled:
             _binding.remote_inference_enabled = True
-            
+
         # define ui layouts
         with gr.Accordion('Cloud Inference', open=True):
             with gr.Row():
@@ -254,8 +255,9 @@ class CloudInferenceScript(scripts.Script):
 
             def _model_refresh():
                 api.get_instance().refresh_models()
-                _binding.remote_sd_models = api.get_instance().list_models() # TODO: fix name_index out of range
-                
+                # TODO: fix name_index out of range
+                _binding.remote_sd_models = api.get_instance().list_models()
+
                 return gr.update(choices=[_.display_name for _ in _binding.remote_sd_models]), gr.update(choices=[_.name for _ in _binding.remote_sd_models if _.kind == 'lora'])
 
             refresh_button.click(
