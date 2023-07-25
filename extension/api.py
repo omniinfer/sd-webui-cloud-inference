@@ -16,6 +16,8 @@ from .version import __version__
 OMNIINFER_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 '.omniinfer.json')
 
+OMNIINFER_API_ENDPOINT = "https://api.omniinfer.io"
+
 
 def _user_agent(model_name=None):
     if model_name:
@@ -71,14 +73,9 @@ class StableDiffusionModel(object):
     @property
     def display_name(self):
         # format -> [<ckpt/lora>] [<tag>] <name>
-        kind = self.kind
-        if self.kind == 'checkpoint':
-            kind = 'ckpt'
-
-        n = "[{}] ".format(kind)
-
-        if self.tags is not None and len(self.tags) != 0:
-            n += "[{}] ".format(self.tags[0])
+        n = ""
+        if len(self.tags) > 0:
+            n = "[{}] ".format(",".join(self.tags))
         return n + os.path.splitext(self.name)[0]
 
     def to_json(self):
@@ -118,7 +115,6 @@ class StableDiffusionModelExample(object):
 class OmniinferAPI(BaseAPI):
 
     def __init__(self, token=None):
-        self._endpoint = 'https://api.omniinfer.io'
         self._token = None
         if self._token is not None:
             self._token = token
@@ -197,7 +193,7 @@ class OmniinferAPI(BaseAPI):
     def test_connection(cls, token):
         if token == "":
             raise Exception("Token is empty")
-        res = requests.get('https://api.omniinfer.io/v2/progress',
+        res = requests.get('{}/v2/progress'.format(OMNIINFER_API_ENDPOINT),
                            params={'key': token})
         if res.status_code >= 400:
             raise Exception("Request failed: {}".format(res.text))
@@ -205,128 +201,6 @@ class OmniinferAPI(BaseAPI):
             raise Exception("Request failed: {}".format(res.text))
 
         return "Omniinfer Ready... now you can inference on cloud"
-
-    def _txt2img(self, model_name, prompts, neg_prompts, sampler_name,
-                 batch_size, steps, n_iter, cfg_scale, seed, height, width,
-                 controlnet_args):
-
-        if self._token is None:
-            raise Exception(
-                "Please configure your omniinfer key in the `Cloud Inference` Tab"
-            )
-
-        # TODO: workaround
-        if isinstance(sampler_name, int):
-            sampler_name = sd_samplers[sampler_name]
-        payload = {
-            "prompt": prompts,
-            "negative_prompt": neg_prompts,
-            "sampler_name": sampler_name or "Euler a",
-            "batch_size": batch_size or 1,
-            "n_iter": n_iter or 1,
-            "steps": steps or 30,
-            "cfg_scale": cfg_scale or 7.5,
-            "seed": int(seed) or -1,
-            "height": height or 512,
-            "width": width or 512,
-            "model_name": model_name,
-            "controlnet_units": controlnet_args
-        }
-
-        # print(
-        #     '[cloud-inference] call api txt2img: payload: {}'.format({
-        #         key: value
-        #         for key, value in payload.items() if key != "controlnet_units"
-        #     }), )
-
-        headers = {
-            "accept": "application/json",
-            "content-type": "application/json",
-            'Accept-Encoding': 'gzip, deflate',
-            "X-OmniInfer-Source": _user_agent(model_name),
-            "User-Agent": _user_agent(model_name)
-        }
-
-        try:
-            res = self._session.post("http://api.omniinfer.io/v2/txt2img",
-                                     json=payload,
-                                     headers=headers,
-                                     params={"key": self._token})
-        except Exception as exp:
-            raise Exception("Request failed: {}, res: {}".format(
-                exp, res.text if res is not None else ""))
-
-        json_data = res.json()
-
-        if json_data['code'] != 0:
-            raise Exception("Request failed: {}".format(res.text))
-
-        return json_data['data']['task_id']
-
-    def _img2img(self, model_name, prompts, neg_prompts, sampler_name,
-                 batch_size, steps, n_iter, cfg_scale, seed, height, width,
-                 restore_faces, denoising_strength, mask_blur_x, mask_blur_y,
-                 inpainting_fill, inpaint_full_res, inpaint_full_res_padding,
-                 inpainting_mask_invert, initial_noise_multiplier, init_images,
-                 controlnet_units):
-
-        if self._token is None:
-            raise Exception(
-                "Please configure your omniinfer key in the `Cloud Inference` Tab"
-            )
-
-        if isinstance(sampler_name, int):
-            sampler_name = sd_samplers[sampler_name]
-
-        payload = {
-            "prompt": prompts,
-            "negative_prompt": neg_prompts,
-            "sampler_name": sampler_name or "Euler a",
-            "batch_size": batch_size or 1,
-            "n_iter": n_iter or 1,
-            "steps": steps or 30,
-            "cfg_scale": cfg_scale or 7.5,
-            "seed": int(seed) or -1,
-            "height": height or 512,
-            "width": width or 512,
-            "model_name": model_name,
-            "restore_faces": restore_faces,
-            "denoising_strength": denoising_strength,
-            "mask_blur_x": mask_blur_x,
-            "mask_blur_y": mask_blur_y,
-            "inpainting_fill": inpainting_fill,
-            "inpaint_full_res": inpaint_full_res,
-            "inpaint_full_res_padding": inpaint_full_res_padding,
-            "inpainting_mask_invert": inpainting_mask_invert,
-            "initial_noise_multiplier": initial_noise_multiplier,
-            "init_images": init_images,
-            "controlnet_units": controlnet_units
-        }
-        headers = {
-            "accept": "application/json",
-            "content-type": "application/json",
-            'Accept-Encoding': 'gzip, deflate',
-            "X-OmniInfer-Source": _user_agent(model_name),
-            "User-Agent": _user_agent(model_name)
-        }
-
-       #  print(
-       #      '[cloud-inference] call api txt2img: payload: {}'.format({
-       #          key: value
-       #          for key, value in payload.items() if key != "controlnet_units"
-       #      }), )
-
-        res = requests.post("http://api.omniinfer.io/v2/img2img",
-                            json=payload,
-                            headers=headers,
-                            params={"key": self._token})
-
-        try:
-            json_data = res.json()
-        except Exception:
-            raise Exception("Request failed: {}".format(res.text))
-
-        return json_data['data']['task_id']
 
     def _wait_task_completed(self, task_id):
         STATUS_CODE_PENDING = 0
@@ -344,7 +218,7 @@ class OmniinferAPI(BaseAPI):
                 raise Exception("Interrupted")
 
             task_res = self._session.get(
-                "http://api.omniinfer.io/v2/progress",
+                "{}/v2/progress".format(OMNIINFER_API_ENDPOINT),
                 params={
                     "key": self._token,
                     "task_id": task_id,
@@ -404,105 +278,139 @@ class OmniinferAPI(BaseAPI):
 
             buffered = io.BytesIO()
             i.save(buffered, format=live_previews_image_format, **save_kwargs)
-            base64_image = base64.b64encode(
-                buffered.getvalue()).decode('ascii')
+            base64_image = base64.b64encode(buffered.getvalue()).decode('ascii')
             images_base64.append(base64_image)
 
-        img_urls = []
+        def _req(p: processing.StableDiffusionProcessingImg2Img, controlnet_units):
+            req = {
+                "model_name": p._cloud_inference_settings['sd_checkpoint'],
+                "init_images": [image_to_base64(_) for _ in p.init_images],
+                "mask": image_to_base64(p.image_mask) if p.image_mask else None,
+                "resize_mode": p.resize_mode,
+                "denoising_strength": p.denoising_strength,
+                "cfg_scale": p.image_cfg_scale,
+                "mask_blur": p.mask_blur_x,
+                "inpainting_fill": p.inpainting_fill,
+                "inpaint_full_res": p.inpaint_full_res,
+                "inpaint_full_res_padding": p.inpaint_full_res_padding,
+                "inpainting_mask_invert": p.inpainting_mask_invert,
+                "initial_noise_multiplier": p.initial_noise_multiplier,
+                "prompt": p.prompt,
+                "seed": int(p.seed) or -1,
+                "negative_prompt": p.negative_prompt,
+                "batch_size": p.batch_size,
+                "n_iter": p.n_iter,
+                "steps": p.steps,
+                "width": p.width,
+                "height": p.height,
+                "restore_faces": p.restore_faces,
+                "clip_skip": opts.CLIP_stop_at_last_layers,
+            }
+            if 'CLIP_stop_at_last_layers' in p.override_settings:
+                req['clip_skip'] = p.override_settings['CLIP_stop_at_last_layers']
+
+            if 'sd_vae' in p._cloud_inference_settings:
+                req['sd_vae'] = p._cloud_inference_settings['sd_vae']
+
+            if len(controlnet_units) > 0:
+                req['controlnet_units'] = controlnet_units
+
+            headers = {
+                "accept": "application/json",
+                "content-type": "application/json",
+                'Accept-Encoding': 'gzip, deflate',
+                "X-OmniInfer-Source": _user_agent(p._cloud_inference_settings['sd_checkpoint']),
+                "X-OmniInfer-Key": self._token,
+                "User-Agent": _user_agent(p._cloud_inference_settings['sd_checkpoint'])
+            }
+
+            res = self._session.post("{}/v2/img2img".format(OMNIINFER_API_ENDPOINT),
+                                     json=req,
+                                     headers=headers,
+                                     params={"key": self._token})
+
+            try:
+                json_data = res.json()
+            except Exception:
+                raise Exception("Request failed: {}".format(res.text))
+
+            if json_data['code'] != 0:
+                raise Exception("Request failed: {}".format(res.text))
+
+            return self._wait_task_completed(json_data['data']['task_id'])
+
+        controlnet_batchs = get_controlnet_arg(p)
+
+        imgs = []
         if len(controlnet_batchs) > 0:
             for c in controlnet_batchs:
-                img_urls.extend(
-                    self._wait_task_completed(
-                        self._img2img(
-                            model_name=p._remote_model_name,
-                            prompts=p.prompt,
-                            neg_prompts=p.negative_prompt,
-                            sampler_name=p.sampler_name,
-                            batch_size=p.batch_size,
-                            steps=p.steps,
-                            n_iter=p.n_iter,
-                            cfg_scale=p.cfg_scale,
-                            seed=p.seed,
-                            height=p.height,
-                            width=p.width,
-                            restore_faces=p.restore_faces,
-                            denoising_strength=p.denoising_strength,
-                            mask_blur_x=p.mask_blur_x,
-                            mask_blur_y=p.mask_blur_y,
-                            inpaint_full_res=bool(p.inpaint_full_res),
-                            inpaint_full_res_padding=p.
-                            inpaint_full_res_padding,
-                            inpainting_fill=p.inpainting_fill,
-                            inpainting_mask_invert=p.inpainting_mask_invert,
-                            initial_noise_multiplier=p.initial_noise_multiplier,
-                            init_images=images_base64,
-                            controlnet_units=c)))
+                imgs.extend(_req(p, c))
         else:
-            img_urls.extend(
-                self._wait_task_completed(
-                    self._img2img(
-                        model_name=p._remote_model_name,
-                        prompts=p.prompt,
-                        neg_prompts=p.negative_prompt,
-                        sampler_name=p.sampler_name,
-                        batch_size=p.batch_size,
-                        steps=p.steps,
-                        n_iter=p.n_iter,
-                        cfg_scale=p.cfg_scale,
-                        seed=p.seed,
-                        height=p.height,
-                        width=p.width,
-                        restore_faces=p.restore_faces,
-                        denoising_strength=p.denoising_strength,
-                        mask_blur_x=p.mask_blur_x,
-                        mask_blur_y=p.mask_blur_y,
-                        inpaint_full_res=bool(p.inpaint_full_res),
-                        inpaint_full_res_padding=p.inpaint_full_res_padding,
-                        inpainting_fill=p.inpainting_fill,
-                        inpainting_mask_invert=p.inpainting_mask_invert,
-                        initial_noise_multiplier=p.initial_noise_multiplier,
-                        init_images=images_base64,
-                        controlnet_units=[])))
-        return retrieve_images(img_urls)
+            imgs.extend(_req(p, []))
+        return retrieve_images(imgs)
 
     def txt2img(self, p: processing.StableDiffusionProcessingTxt2Img):
         controlnet_batchs = get_controlnet_arg(p)
 
-        img_urls = []
+        def _req(p: processing.StableDiffusionProcessingTxt2Img, controlnet_units):
+            req = {
+                "model_name": p._cloud_inference_settings['sd_checkpoint'],
+                "prompt": p.prompt,
+                "negative_prompt": p.negative_prompt,
+                "sampler_name": p.sampler_name or "Euler a",
+                "batch_size": p.batch_size or 1,
+                "n_iter": p.n_iter or 1,
+                "steps": p.steps or 30,
+                "cfg_scale": p.cfg_scale or 7.5,
+                "seed": int(p.seed) or -1,
+                "height": p.height or 512,
+                "width": p.width or 512,
+                "restore_faces": p.restore_faces,
+                "clip_skip": opts.CLIP_stop_at_last_layers,
+            }
+
+            if 'CLIP_stop_at_last_layers' in p.override_settings:
+                req['clip_skip'] = p.override_settings['CLIP_stop_at_last_layers']
+
+            if 'sd_vae' in p._cloud_inference_settings:
+                req['sd_vae'] = p._cloud_inference_settings['sd_vae']
+
+            if len(controlnet_units) > 0:
+                req['controlnet_units'] = controlnet_units
+
+            headers = {
+                "accept": "application/json",
+                "content-type": "application/json",
+                'Accept-Encoding': 'gzip, deflate',
+                "X-OmniInfer-Source": _user_agent(p._cloud_inference_settings['sd_checkpoint']),
+                "X-OmniInfer-Key": self._token,
+                "User-Agent": _user_agent(p._cloud_inference_settings['sd_checkpoint'])
+            }
+
+            res = self._session.post("{}/v2/txt2img".format(OMNIINFER_API_ENDPOINT),
+                                     json=req,
+                                     headers=headers,
+                                     params={"key": self._token})
+            try:
+                json_data = res.json()
+            except Exception:
+                raise Exception("Request failed: {}".format(res.text))
+
+            if json_data['code'] != 0:
+                raise Exception("Request failed: {}".format(res.text))
+
+            return self._wait_task_completed(json_data['data']['task_id'])
+
+        imgs = []
         if len(controlnet_batchs) > 0:
             for c in controlnet_batchs:
-                img_urls.extend(
-                    self._wait_task_completed(
-                        self._txt2img(model_name=p._remote_model_name,
-                                      prompts=p.prompt,
-                                      neg_prompts=p.negative_prompt,
-                                      sampler_name=p.sampler_name,
-                                      batch_size=p.batch_size,
-                                      steps=p.steps,
-                                      n_iter=p.n_iter,
-                                      cfg_scale=p.cfg_scale,
-                                      seed=p.seed,
-                                      height=p.height,
-                                      width=p.width,
-                                      controlnet_args=c)))
+                imgs.extend(_req(p, c))
         else:
-            img_urls.extend(
-                self._wait_task_completed(
-                    self._txt2img(model_name=p._remote_model_name,
-                                  prompts=p.prompt,
-                                  neg_prompts=p.negative_prompt,
-                                  sampler_name=p.sampler_name,
-                                  batch_size=p.batch_size,
-                                  steps=p.steps,
-                                  n_iter=p.n_iter,
-                                  cfg_scale=p.cfg_scale,
-                                  seed=p.seed,
-                                  height=p.height,
-                                  width=p.width,
-                                  controlnet_args=[])))
+            imgs.extend(_req(p, []))
 
         state.textinfo = "downloading images..."
-        return retrieve_images(img_urls)
+
+        return retrieve_images(imgs)
 
     def list_models(self):
         if self._models is None or len(self._models) == 0:
@@ -510,51 +418,73 @@ class OmniinferAPI(BaseAPI):
         return sorted(self._models, key=lambda x: x.rating, reverse=True)
 
     def refresh_models(self):
-        url = "http://api.omniinfer.io/v2/models"
-        headers = {
-            "accept": "application/json",
-            'Accept-Encoding': 'gzip, deflate',
-            "X-OmniInfer-Source": _user_agent(),
-            "User-Agent": _user_agent()
-        }
 
-        print("[cloud-inference] refreshing models...")
-        sd_models = []
+        def get_models(kind):
+            url = "{}/v2/models".format(OMNIINFER_API_ENDPOINT)
+            headers = {
+                "accept": "application/json",
+                'Accept-Encoding': 'gzip, deflate',
+                "X-OmniInfer-Source": _user_agent(),
+                "User-Agent": _user_agent()
+            }
 
-        res = requests.get(url, headers=headers)
-        if res.status_code >= 400:
-            return []
-        for item in res.json()["data"]["models"]:
-            model = StableDiffusionModel(kind=item["type"],
-                                         name=item["sd_name"])
-            model.rating = item.get("civitai_download_count", 0)
-            model.tags = item["civitai_tags"].split(",") if item.get(
-                "civitai_tags", None) is not None else []
+            res = requests.get(url, headers=headers, params={"type": kind})
+            if res.status_code >= 400:
+                return []
 
-            if len(item.get('civitai_images',
-                            [])) > 0 and item['civitai_images'][0]['meta'].get(
-                                'prompt') is not None:
-                first_image = item['civitai_images'][0]
-                first_image_meta = item['civitai_images'][0]['meta']
-                model.example = StableDiffusionModelExample(
-                    prompts=first_image_meta['prompt'],
-                    neg_prompt=first_image_meta.get('negative_prompt', None),
-                    width=first_image_meta.get('width', None),
-                    height=first_image_meta.get('height', None),
-                    sampler_name=first_image_meta.get('sampler_name', None),
-                    cfg_scale=first_image_meta.get('cfg_scale', None),
-                    seed=first_image_meta.get('seed', None),
-                    preview=first_image.get('url', None)
-                )
+            models = []
+            if res.json()["data"]["models"] is not None:
+                models = res.json()["data"]["models"]
 
-            if item['type'] == 'lora':
-                civitai_dependency_model_name = item.get(
-                    'civitai_dependency_model_name', None)
-                if civitai_dependency_model_name is not None:
-                    model.dependency_model_name = civitai_dependency_model_name
-            sd_models.append(model)
+            for item in models:
+                model = StableDiffusionModel(kind=item["type"],
+                                             name=item["sd_name"])
+                model.rating = item.get("civitai_download_count", 0)
+                civitai_tags = item["civitai_tags"].split(",") if item.get(
+                    "civitai_tags", None) is not None else []
+
+                if model.tags is None:
+                    model.tags = []
+
+                if len(civitai_tags) > 0:
+                    model.tags.append(civitai_tags[0])
+
+                if item.get('civitai_nsfw', False):
+                    model.tags.append("nsfw")
+
+                if len(item.get('civitai_images',
+                                [])) > 0 and item['civitai_images'][0]['meta'].get(
+                                    'prompt') is not None:
+                    first_image = item['civitai_images'][0]
+                    first_image_meta = item['civitai_images'][0]['meta']
+                    model.example = StableDiffusionModelExample(
+                        prompts=first_image_meta['prompt'],
+                        neg_prompt=first_image_meta.get('negative_prompt', None),
+                        width=first_image_meta.get('width', None),
+                        height=first_image_meta.get('height', None),
+                        sampler_name=first_image_meta.get('sampler_name', None),
+                        cfg_scale=first_image_meta.get('cfg_scale', None),
+                        seed=first_image_meta.get('seed', None),
+                        preview=first_image.get('url', None)
+                    )
+
+                if item['type'] == 'lora':
+                    civitai_dependency_model_name = item.get(
+                        'civitai_dependency_model_name', None)
+                    if civitai_dependency_model_name is not None:
+                        model.dependency_model_name = civitai_dependency_model_name
+                sd_models.append(model)
 
         m = {}
+        sd_models = []
+        print("[cloud-inference] refreshing models...")
+
+        get_models("checkpoint")
+        get_models("lora")
+        get_models("controlnet")
+        get_models("vae")
+
+        # build lora and checkpoint relationship
         for model in sd_models:
             m[model.name] = model
 
@@ -562,6 +492,7 @@ class OmniinferAPI(BaseAPI):
             if model.dependency_model_name is not None:
                 if m.get(model.dependency_model_name) is not None:
                     m[model.dependency_model_name].append_child(model.name)
+
 
         self.__class__.update_models_to_config(sd_models)
         self._models = sd_models
@@ -603,6 +534,25 @@ def get_controlnet_arg(p: processing.StableDiffusionProcessing):
         controlnet_arg['weight'] = c.weight
         controlnet_arg['model'] = c.model.strip("[cloud] ")
         controlnet_arg['module'] = c.module
+        if c.resize_mode == "Just Resize":
+            controlnet_arg['resize_mode'] = 0
+        elif c.resize_mode == "Resize and Crop":
+            controlnet_arg['resize_mode'] = 1
+        elif c.resize_mode == "Envelope (Outer Fit)":
+            controlnet_arg['resize_code'] = 2
+
+        if 'processor_res' in c.__dict__:
+            if c.processor_res > 0:
+                controlnet_arg['processor_res'] = c.processor_res
+
+        if 'threshold_a' in c.__dict__:
+            controlnet_arg['threshold_a'] = int(c.threshold_a)
+        if 'threshold_b' in c.__dict__:
+            controlnet_arg['threshold_b'] = int(c.threshold_b)
+        if 'guidance_start' in c.__dict__:
+            controlnet_arg['guidance_start'] = c.guidance_start
+        if 'guidance_end' in c.__dict__:
+            controlnet_arg['guidance_end'] = c.guidance_end
 
         if c.control_mode == "Balanced":
             controlnet_arg['control_mode'] = 0
@@ -616,8 +566,7 @@ def get_controlnet_arg(p: processing.StableDiffusionProcessing):
         if getattr(c.input_mode, 'value', '') == "simple":
             if c.image:
                 if "mask" in c.image:
-                    mask = Image.fromarray(
-                        c.image["mask"])
+                    mask = Image.fromarray(c.image["mask"])
                     controlnet_arg['mask'] = image_to_base64(mask)
 
                 controlnet_arg['input_image'] = image_to_base64(
@@ -666,3 +615,4 @@ def retrieve_images(img_urls):
         applied.append(pool.apply_async(_download, (img_url, )))
     ret = [r.get() for r in applied]
     return [_ for _ in ret if _ is not None]
+

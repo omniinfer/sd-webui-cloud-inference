@@ -18,6 +18,7 @@ class _HijackManager(object):
 
     def __init__(self):
         self._hijacked = False
+        self._xyz_hijacked = False
         self._binding = None
 
         self.hijack_map = {}
@@ -47,13 +48,12 @@ class _HijackManager(object):
 
         self.hijack_one('modules.processing.process_images',
                         self._hijack_process_images)
-        self.hijack_one(
-            'extensions.sd-webui-controlnet.scripts.global_state.update_cn_models', self._hijack_update_cn_models)
-
-        self._apply_xyz()
+        self.hijack_one('extensions.sd-webui-controlnet.scripts.global_state.update_cn_models', self._hijack_update_cn_models)
         print('[cloud-inference] hijack finished')
 
     def _apply_xyz(self):
+        if self._xyz_hijacked:
+            return
 
         def find_module(module_names):
             if isinstance(module_names, str):
@@ -66,29 +66,52 @@ class _HijackManager(object):
 
         xyz_grid = find_module("xyz_grid.py, xy_grid.py")
         if xyz_grid:
+            def xyz_checkpoint_apply(p: StableDiffusionProcessing, opt, v):
+                if '_cloud_inference_settings' not in p.__dict__:
+                    p._cloud_inference_settings = {}
 
-            def xyz_model_apply(p: StableDiffusionProcessing, opt, v):
                 m = self._binding.choice_to_model(opt)
-                if m.kind == 'lora':
-                    p._remote_model_name = m.dependency_model_name
-                    p.prompt = self._binding._update_lora_in_prompt(
-                        p.prompt, m.name)
-                else:
-                    p._remote_model_name = m.name
+                # if m.kind == 'lora':
+                #     p._cloud_inference_settings['sd_checkpoint'] = m.dependency_model_name
+                #     p.prompt = self._binding._update_lora_in_prompt(
+                #         p.prompt, m.name)
+                # else:
+                p._cloud_inference_settings['sd_checkpoint'] = m.name
 
-            def xyz_model_confirm(p, opt):
+            def xyz_checkpoint_confirm(p, opt):
                 return
 
-            def xyz_model_format(p, opt, v):
+            def xyz_checkpoint_format(p, opt, v):
                 return self._binding.choice_to_model(v).name.rsplit(".", 1)[0]
 
+            def xyz_vae_apply(p: StableDiffusionProcessing, opt, v):
+                if '_cloud_inference_settings' not in p.__dict__:
+                    p._cloud_inference_settings = {}
+
+                p._cloud_inference_settings['sd_vae'] = opt
+
+            def xyz_vae_confirm(p, opt):
+                return
+
+            def xyz_vae_format(p, opt, v):
+                return v
+
+            print('[cloud-inference] hijack xyz_grid')
             xyz_grid.axis_options.append(
-                xyz_grid.AxisOption('[Cloud Inference] Model Name',
+                xyz_grid.AxisOption('[Cloud Inference] Checkpoint',
                                     str,
-                                    apply=xyz_model_apply,
-                                    confirm=xyz_model_confirm,
-                                    format_value=xyz_model_format,
-                                    choices=self._binding.get_model_ckpt_choices))
+                                    apply=xyz_checkpoint_apply,
+                                    confirm=xyz_checkpoint_confirm,
+                                    format_value=xyz_checkpoint_format,
+                                    choices=lambda: [_.display_name for _ in self._binding.remote_model_checkpoints]))
+            xyz_grid.axis_options.append(
+                xyz_grid.AxisOption('[Cloud Inference] VAE',
+                                    str,
+                                    apply=xyz_vae_apply,
+                                    confirm=xyz_vae_confirm,
+                                    format_value=xyz_vae_format,
+                                    choices=lambda: ["Automatic", "None"] + [_.name for _ in self._binding.remote_model_vaes]))
+        self._xyz_hijacked = True
 
     def _hijack_update_cn_models(self):
         from modules.scripts import scripts_data
@@ -96,41 +119,12 @@ class _HijackManager(object):
             if script.module.__name__ == 'controlnet.py':
                 if self._binding.remote_inference_enabled:
                     script.module.global_state.cn_models.clear()
-                    script.module.global_state.cn_models.update({  # dont to replace
-                        'None': None,
-                        "[cloud] control_v11e_sd15_ip2p": None,
-                        "[cloud] control_v11e_sd15_shuffle": None,
-                        "[cloud] control_v11f1e_sd15_tile": None,
-                        "[cloud] control_v11f1p_sd15_depth": None,
-                        "[cloud] control_v11p_sd15_canny": None,
-                        "[cloud] control_v11p_sd15_inpaint": None,
-                        "[cloud] control_v11p_sd15_lineart": None,
-                        "[cloud] control_v11p_sd15_mlsd": None,
-                        "[cloud] control_v11p_sd15_normalbae": None,
-                        "[cloud] control_v11p_sd15_openpose": None,
-                        "[cloud] control_v11p_sd15_scribble": None,
-                        "[cloud] control_v11p_sd15_seg": None,
-                        "[cloud] control_v11p_sd15_softedge": None,
-                        "[cloud] control_v11p_sd15s2_lineart_anime": None,
-                    })
+                    cn_models_keys = ["None"] + [_.name for _ in self._binding.remote_model_controlnet]
+                    cn_models_dict = {k: None for k in cn_models_keys}
+
+                    script.module.global_state.cn_models.update(cn_models_dict)
                     script.module.global_state.cn_models_names.clear()
-                    script.module.global_state.cn_models_names.update({  # dont to replace
-                        'None': None,
-                        "[cloud] control_v11e_sd15_ip2p": None,
-                        "[cloud] control_v11e_sd15_shuffle": None,
-                        "[cloud] control_v11f1e_sd15_tile": None,
-                        "[cloud] control_v11f1p_sd15_depth": None,
-                        "[cloud] control_v11p_sd15_canny": None,
-                        "[cloud] control_v11p_sd15_inpaint": None,
-                        "[cloud] control_v11p_sd15_lineart": None,
-                        "[cloud] control_v11p_sd15_mlsd": None,
-                        "[cloud] control_v11p_sd15_normalbae": None,
-                        "[cloud] control_v11p_sd15_openpose": None,
-                        "[cloud] control_v11p_sd15_scribble": None,
-                        "[cloud] control_v11p_sd15_seg": None,
-                        "[cloud] control_v11p_sd15_softedge": None,
-                        "[cloud] control_v11p_sd15s2_lineart_anime": None,
-                    })
+                    script.module.global_state.cn_models_names.update(cn_models_dict)
                     break
                 else:
                     self.hijack_map['extensions.sd-webui-controlnet.scripts.global_state.update_cn_models']['old']()
@@ -143,7 +137,7 @@ class _HijackManager(object):
             raise Exception(
                 'process_images: first argument must be a processing object')
 
-        remote_inference_enabled, selected_model_index = get_visible_extension_args(
+        remote_inference_enabled, selected_checkpoint_index, selected_vae_name = get_visible_extension_args(
             p, 'cloud inference')
 
         if not remote_inference_enabled:
@@ -159,8 +153,14 @@ class _HijackManager(object):
 
         state.textinfo = "remote inferencing ({})".format(
             api.get_instance().__class__.__name__)
-        if not getattr(p, '_remote_model_name', None):  # xyz_grid
-            p._remote_model_name = self._binding.remote_sd_models[selected_model_index].name
+
+        if '_cloud_inference_settings' not in p.__dict__:
+            p._cloud_inference_settings = {}
+
+        if 'sd_checkpoint' not in p._cloud_inference_settings:
+            p._cloud_inference_settings['sd_checkpoint'] = self._binding.remote_model_checkpoints[selected_checkpoint_index].name
+        if 'sd_vae' not in p._cloud_inference_settings:
+            p._cloud_inference_settings['sd_vae'] = selected_vae_name
 
         if isinstance(p, StableDiffusionProcessingTxt2Img):
             generated_images = api.get_instance().txt2img(p)
@@ -298,7 +298,7 @@ def create_infotext(p,
         "Seed": all_seeds[index],
         "Face restoration": (opts.face_restoration_model if p.restore_faces else None),
         "Size": f"{p.width}x{p.height}",
-        "Model": (None if not opts.add_model_name_to_info or not p._remote_model_name else p._remote_model_name.replace(',', '').replace(':', '')),
+        "Model": (None if not opts.add_model_name_to_info or not p._cloud_inference_settings['sd_checkpoint'] else p._cloud_inference_settings['sd_checkpoint'].replace(',', '').replace(':', '')),
         "Variation seed": (None if p.subseed_strength == 0 else all_subseeds[index]),
         "Variation seed strength": (None if p.subseed_strength == 0 else p.subseed_strength),
         "Seed resize from": (None if p.seed_resize_from_w == 0 or p.seed_resize_from_h == 0 else f"{p.seed_resize_from_w}x{p.seed_resize_from_h}"),
@@ -412,7 +412,6 @@ def _hijack_func(module_name, func_name, new_func):
     else:
         # hijack for extension module
 
-
         from modules.scripts import scripts_data
         tmp1, tmp2, extension_suffix = module_name.split(
             '.', 2)  # scripts internal module name
@@ -422,7 +421,6 @@ def _hijack_func(module_name, func_name, new_func):
         for script in scripts_data:
             if extension_mode and os.path.join(*extension_prefix.split('.')) not in script.basedir:
                 continue
-
             for name in search_names:
                 if name in script.module.__dict__:
                     obj = script.module.__dict__[name]
@@ -433,6 +431,8 @@ def _hijack_func(module_name, func_name, new_func):
                         replace = True
 
                     if replace:
+                        # import pkgutil
+                        # s = [_ for _ in pkgutil.iter_modules([os.path.dirname(script.module.__file__)])]
                         if name == func_name:
                             print(
                                 '[cloud-inference] reloading {} - {}'.format(script.module.__name__, func_name))
@@ -445,6 +445,7 @@ def _hijack_func(module_name, func_name, new_func):
                             old_func = getattr(t, func_name)
                             setattr(t, func_name, new_func)
                             setattr(script.module, name, t)
+                    # print(importlib.reload(importlib.import_module('extensions.sd-webui-controlnet.scripts.xyz_grid_support')))
         return old_func
 
 

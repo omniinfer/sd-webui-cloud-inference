@@ -1,20 +1,12 @@
 import modules.scripts as scripts
-import html
-import sys
 import gradio as gr
 
-from modules import images, script_callbacks, errors, processing, ui, shared
-from modules.processing import Processed, StableDiffusionProcessingImg2Img, StableDiffusionProcessingTxt2Img, StableDiffusionProcessing
-from modules.shared import opts, state, prompt_styles
+from modules import script_callbacks, shared
 from extension import api
 
-from inspect import getmembers, isfunction
 import random
-import traceback
 import os
 
-
-DEMO_MODE = os.getenv("CLOUD_INFERENCE_DEMO_MODE")
 
 
 refresh_symbol = '\U0001f504'  # 🔄
@@ -55,30 +47,30 @@ class DataBinding:
         self.img2img_cloud_inference_checkbox = None
         self.txt2img_cloud_inference_checkbox = None
 
+        self.txt2img_cloud_inference_vae_dropdown = None
+        self.img2img_cloud_inference_vae_dropdown = None
+
         self.txt2img_cloud_inference_suggest_prompts_checkbox = None
         self.img2img_cloud_inference_suggest_prompts_checkbox = None
 
         self.remote_inference_enabled = False
-        self.remote_sd_models = None
+
+        self.remote_models = None
+        self.remote_model_checkpoints = None
+        self.remote_model_loras = None
+        self.remote_model_controlnet = None
+        self.remote_model_vaes = None
+
+        # third component
+        self.txt2img_controlnet_model_dropdown = None
+        self.img2img_controlnet_model_dropdown = None
+
         self.default_remote_model = None
         self.initialized = False
 
-    def on_selected_model(self, name_index: int, selected_loras: list[str], suggest_prompts_enabled, prompt: str, neg_prompt: str):
-        selected: api.StableDiffusionModel = self.remote_sd_models[name_index]
-        selected_checkpoint: api.StableDiffusionModel = None
-        selected_checkpoint_index: int = 0
-
-        # if selected model is lora, then we need to get base model of it and set selected model to base model
-        if selected.kind == 'lora':
-            for idx, model in enumerate(self.remote_sd_models):
-                if model.name == selected.dependency_model_name:
-                    selected_checkpoint = model
-                    # selected_checkpoint_index = idx
-                    selected_loras = [selected.name]
-                    break
-        else:
-            selected_checkpoint = selected
-            # selected_checkpoint_index = name_index
+    def on_selected_model(self, name_index: int, suggest_prompts_enabled, prompt: str, neg_prompt: str):
+        selected: api.StableDiffusionModel = self.remote_model_checkpoints[name_index]
+        selected_checkpoint = selected
 
         # name = self.remote_sd_models[name_index].name
         prompt = prompt
@@ -88,19 +80,28 @@ class DataBinding:
             if selected.example.prompts is not None and suggest_prompts_enabled:
                 prompt = selected.example.prompts
                 prompt = prompt.replace("\n", "")
-                if len(selected_loras) > 0:
-                    prompt = self._update_lora_in_prompt(
-                        selected.example.prompts, selected_loras)
-                prompt = prompt.replace("\n", "")
             if selected.example.neg_prompt is not None and suggest_prompts_enabled:
                 neg_prompt = selected.example.neg_prompt
 
         return gr.Dropdown.update(
-            choices=[_.display_name for _ in self.remote_sd_models],
-            value=selected_checkpoint.display_name), gr.update(value=selected_loras), gr.update(value=prompt), gr.update(value=neg_prompt)
+            choices=[_.display_name for _ in self.remote_model_checkpoints],
+            value=selected_checkpoint.display_name), gr.update(value=prompt), gr.update(value=neg_prompt)
+
+    def update_models(self):
+        _binding.remote_model_loras =  _get_kind_from_remote_models(_binding.remote_models, "lora")
+        _binding.remote_model_checkpoints = _get_kind_from_remote_models(_binding.remote_models, "checkpoint")
+        _binding.remote_model_vaes = _get_kind_from_remote_models(_binding.remote_models, "vae")
+        _binding.remote_model_controlnet = _get_kind_from_remote_models(_binding.remote_models, "controlnet")
+      
+            
 
     @staticmethod
-    def _update_lora_in_prompt(prompt, lora_names, weight=1):
+    def _update_lora_in_prompt(prompt, _lora_names, weight=1):
+        lora_names = []
+        for lora_name in _lora_names:
+            lora_names.append(
+                _binding.find_model_by_display_name(lora_name).name)
+
         prompt = prompt
         add_lora_prompts = []
 
@@ -123,36 +124,23 @@ class DataBinding:
         return ", ".join(prompt_split)
 
     def update_selected_lora(self, lora_names, prompt):
-        print("[cloud-inference] set_selected_lora", lora_names)
         return gr.update(value=self._update_lora_in_prompt(prompt, lora_names))
 
     def update_cloud_api(self, v):
-        # TODO: support multiple cloud api provider
-        print("[cloud-inference] set_cloud_api", v)
         self.cloud_api = v
 
-    def get_selected_model_loras(self):
-        ret = []
-        for ckpt in self.remote_sd_models:
-            if ckpt.name == self.selected_checkpoint.name:
-                for lora_name in ckpt.child:
-                    ret.append(lora_name)
-        return ret
-
-    def get_model_loras_cohices(self, base=None):
-        ret = []
-        for model in self.remote_sd_models:
-            if model.kind == 'lora':
-                ret.append(model.name)
-        return ret
-
-    def choice_to_model(self, choice):  # display_name -> sd_name
-        for model in self.remote_sd_models:
+    def find_model_by_display_name(self, choice):  # display_name -> sd_name
+        for model in self.remote_models:
             if model.display_name == choice:
                 return model
 
-    def get_model_ckpt_choices(self):
-        return [_.display_name for _ in self.remote_sd_models]
+
+def _get_kind_from_remote_models(models, kind):
+    t = []
+    for model in models:
+        if model.kind == kind:
+            t.append(model)
+    return t
 
 
 class CloudInferenceScript(scripts.Script):
@@ -169,13 +157,14 @@ class CloudInferenceScript(scripts.Script):
             tabname = "img2img"
 
         # data initialize, TODO: move
-        if _binding.remote_sd_models is None or len(_binding.remote_sd_models) == 0:
-            _binding.remote_sd_models = api.get_instance().list_models()
+        if _binding.remote_models is None or len(_binding.remote_models) == 0:
+            _binding.remote_models = api.get_instance().list_models()
+            _binding.update_models()
 
-        top_n = min(len(_binding.remote_sd_models), 50)
+        top_n = min(len(_binding.remote_model_checkpoints), 50)
         if _binding.default_remote_model is None:
             _binding.default_remote_model = random.choice(
-                _binding.remote_sd_models[:top_n]).display_name if len(_binding.remote_sd_models) > 0 else None
+                _binding.remote_model_checkpoints[:top_n]).display_name if len(_binding.remote_model_checkpoints) > 0 else None
 
         default_enabled = shared.opts.data.get(
             "cloud_inference_default_enabled", False)
@@ -206,8 +195,9 @@ class CloudInferenceScript(scripts.Script):
                 )
 
                 cloud_inference_model_dropdown = gr.Dropdown(
-                    label="Quick Select (Checkpoint/Lora)",
-                    choices=_binding.get_model_ckpt_choices(),
+                    label="Checkpoint",
+                    choices=[
+                        _.display_name for _ in _binding.remote_model_checkpoints],
                     value=lambda: _binding.default_remote_model,
                     type="index",
                     elem_id="{}_cloud_inference_model_dropdown".format(tabname))
@@ -219,9 +209,28 @@ class CloudInferenceScript(scripts.Script):
 
             with gr.Row():
                 cloud_inference_lora_dropdown = gr.Dropdown(
-                    choices=_binding.get_model_loras_cohices(),
+                    choices=[_.display_name for _ in _binding.remote_model_loras],
                     label="Lora",
-                    elem_id="{}_cloud_inference_lora_dropdown", multiselect=True)
+                    elem_id="{}_cloud_inference_lora_dropdown", multiselect=True, scale=4)
+
+                cloud_inference_extra_checkbox = gr.Checkbox(
+                    label="Extra",
+                    value=False,
+                    elem_id="{}_cloud_inference_extra_subseed_show",
+                    scale=1
+                )
+
+            with gr.Row(visible=False) as extra_row:
+                cloud_inference_vae_dropdown = gr.Dropdown(
+                    choices=["Automatic", "None"] + [
+                        _.name for _ in _binding.remote_model_vaes],
+                    value="Automatic",
+                    label="VAE",
+                    elme_id="{}_cloud_inference_vae_dropdown".format(tabname),
+                )
+
+                cloud_inference_extra_checkbox.change(lambda x: gr.update(visible=x), inputs=[
+                                                      cloud_inference_extra_checkbox], outputs=[extra_row])
 
             # define events of components.
             # auto fill prompt after select model
@@ -229,7 +238,6 @@ class CloudInferenceScript(scripts.Script):
                 fn=_binding.on_selected_model,
                 inputs=[
                     cloud_inference_model_dropdown,
-                    cloud_inference_lora_dropdown,
                     cloud_inference_suggest_prompts_checkbox,
                     getattr(_binding, "{}_prompt".format(tabname)),
                     getattr(_binding, "{}_neg_prompt".format(tabname))
@@ -237,7 +245,6 @@ class CloudInferenceScript(scripts.Script):
                 ],
                 outputs=[
                     cloud_inference_model_dropdown,
-                    cloud_inference_lora_dropdown,
                     getattr(_binding, "{}_prompt".format(tabname)),
                     getattr(_binding, "{}_neg_prompt".format(tabname))
                 ])
@@ -256,17 +263,20 @@ class CloudInferenceScript(scripts.Script):
             def _model_refresh():
                 api.get_instance().refresh_models()
                 # TODO: fix name_index out of range
-                _binding.remote_sd_models = api.get_instance().list_models()
+                _binding.remote_models = api.get_instance().list_models()
+                _binding.update_models()
 
-                return gr.update(choices=[_.display_name for _ in _binding.remote_sd_models]), gr.update(choices=[_.name for _ in _binding.remote_sd_models if _.kind == 'lora'])
+                return gr.update(choices=[_.display_name for _ in _binding.remote_model_checkpoints]), gr.update(choices=[_.display_name for _ in _binding.remote_model_loras]), gr.update(choices=["Automatic", "None"] + [_.name for _ in _binding.remote_model_vaes])
 
             refresh_button.click(
                 fn=_model_refresh,
                 inputs=[],
                 outputs=[cloud_inference_model_dropdown,
-                         cloud_inference_lora_dropdown])
+                         cloud_inference_lora_dropdown,
+                         cloud_inference_vae_dropdown
+                         ])
 
-        return [cloud_inference_checkbox, cloud_inference_model_dropdown]
+        return [cloud_inference_checkbox, cloud_inference_model_dropdown, cloud_inference_vae_dropdown]
 
 
 _binding = None
@@ -274,6 +284,7 @@ if _binding is None:
     _binding = DataBinding()
     from scripts.hijack import _hijack_manager
     _hijack_manager._binding = _binding
+    _hijack_manager._apply_xyz()  # TOOD
 
 
 print('Loading extension: sd-webui-cloud-inference')
@@ -309,6 +320,16 @@ def on_after_component_callback(component, **_kwargs):
     if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) == 'img2img_cloud_inference_model_dropdown':
         _binding.img2img_cloud_inference_model_dropdown = component
 
+    if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) == 'txt2img_controlnet_ControlNet-0_controlnet_model_dropdown':
+        _binding.txt2img_controlnet_model_dropdown = component
+    if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) == 'img2img_controlnet_ControlNet-0_controlnet_model_dropdown':
+        _binding.img2img_controlnet_model_dropdown = component
+
+    # if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) == 'txt2img_cloud_inference_vae_dropdown':
+    #     _binding.txt2img_cloud_inference_vae_dropdown = component
+    # if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) == 'img2img_cloud_inference_vae_dropdown':
+    #     _binding.img2img_cloud_inference_vae_dropdown = component
+
     if _binding.txt2img_cloud_inference_checkbox and \
             _binding.img2img_cloud_inference_checkbox and \
             _binding.txt2img_cloud_inference_model_dropdown and \
@@ -317,6 +338,8 @@ def on_after_component_callback(component, **_kwargs):
             _binding.img2img_cloud_inference_suggest_prompts_checkbox and \
             _binding.txt2img_generate and \
             _binding.img2img_generate and \
+            _binding.txt2img_controlnet_model_dropdown and \
+            _binding.img2img_controlnet_model_dropdown and \
             not _binding.initialized:
 
         sync_cloud_model(_binding.txt2img_cloud_inference_model_dropdown,
@@ -324,9 +347,13 @@ def on_after_component_callback(component, **_kwargs):
 
         sync_two_component(_binding.txt2img_cloud_inference_suggest_prompts_checkbox,
                            _binding.img2img_cloud_inference_suggest_prompts_checkbox, 'change')
+        # sync_two_component(_binding.txt2img_cloud_inference_vae_dropdown,
+        #    _binding.img2img_cloud_inference_vae_dropdown,
+        #    'select'
+        #    )
 
         sync_cloud_inference_checkbox(_binding.txt2img_cloud_inference_checkbox,
-                                      _binding.img2img_cloud_inference_checkbox, _binding.txt2img_generate, _binding.img2img_generate)
+                                      _binding.img2img_cloud_inference_checkbox, _binding.txt2img_generate, _binding.img2img_generate, _binding.txt2img_controlnet_model_dropdown, _binding.img2img_controlnet_model_dropdown)
 
         _binding.initialized = True
 
@@ -345,22 +372,22 @@ def sync_cloud_model(a, b):
         if a != b:
             b = a
 
-        target_model = _binding.remote_sd_models[b]
+        target_model = _binding.remote_model_checkpoints[b]
         # TODO
         if target_model.kind == 'lora' and target_model.dependency_model_name != None:
-            for model in _binding.remote_sd_models:
+            for model in _binding.remote_models:
                 if model.name == target_model.dependency_model_name:
                     b = model.display_name
                     break
         elif target_model.kind == 'checkpoint':
             b = target_model.display_name
 
-        return _binding.remote_sd_models[a].display_name, b
+        return _binding.remote_model_checkpoints[a].display_name, b
     getattr(a, "select")(fn=mirror, inputs=[a, b], outputs=[a, b])
     getattr(b, "select")(fn=mirror, inputs=[b, a], outputs=[b, a])
 
 
-def sync_cloud_inference_checkbox(txt2img_checkbox, img2img_checkbox, txt2img_generate_button, img2img_generate_button):
+def sync_cloud_inference_checkbox(txt2img_checkbox, img2img_checkbox, txt2img_generate_button, img2img_generate_button, txt2img_controlnet_model_dropdown, img2img_controlnet_model_dropdown):
     def mirror(source, target):
         enabled = source
 
@@ -374,12 +401,37 @@ def sync_cloud_inference_checkbox(txt2img_checkbox, img2img_checkbox, txt2img_ge
         else:
             _binding.remote_inference_enabled = False
 
-        return source, target, button_text, button_text
+        # TODO
+        # controlnet_models = [
+        #     "None",
+        #     "[cloud] control_v11e_sd15_ip2p",
+        #     "[cloud] control_v11e_sd15_shuffle",
+        #     "[cloud] control_v11f1e_sd15_tile",
+        #     "[cloud] control_v11f1p_sd15_depth",
+        #     "[cloud] control_v11p_sd15_canny",
+        #     "[cloud] control_v11p_sd15_inpaint",
+        #     "[cloud] control_v11p_sd15_lineart",
+        #     "[cloud] control_v11p_sd15_mlsd",
+        #     "[cloud] control_v11p_sd15_normalbae",
+        #     "[cloud] control_v11p_sd15_openpose",
+        #     "[cloud] control_v11p_sd15_scribble",
+        #     "[cloud] control_v11p_sd15_seg",
+        #     "[cloud] control_v11p_sd15_softedge",
+        #     "[cloud] control_v11p_sd15s2_lineart_anime",
+        # ]
+
+        controlnet_models = ["None"] + \
+            [_.name for _ in _binding.remote_model_controlnet]
+
+        if not enabled:
+            return source, target, button_text, button_text, None, None
+
+        return source, target, button_text, button_text, gr.update(value=controlnet_models[0], choices=controlnet_models), gr.update(value=controlnet_models[0], choices=controlnet_models)
 
     txt2img_checkbox.change(fn=mirror, inputs=[txt2img_checkbox, img2img_checkbox], outputs=[
-                            txt2img_checkbox, img2img_checkbox, txt2img_generate_button, img2img_generate_button])
+                            txt2img_checkbox, img2img_checkbox, txt2img_generate_button, img2img_generate_button, txt2img_controlnet_model_dropdown, img2img_controlnet_model_dropdown])
     img2img_checkbox.change(fn=mirror, inputs=[img2img_checkbox, txt2img_checkbox], outputs=[
-                            img2img_checkbox, txt2img_checkbox, txt2img_generate_button, img2img_generate_button])
+                            img2img_checkbox, txt2img_checkbox, txt2img_generate_button, img2img_generate_button, txt2img_controlnet_model_dropdown, img2img_controlnet_model_dropdown])
 
 
 def on_ui_settings():
