@@ -8,7 +8,6 @@ import random
 import os
 
 
-
 refresh_symbol = '\U0001f504'  # 🔄
 favorite_symbol = '\U0001f49e'  # 💞
 
@@ -88,12 +87,14 @@ class DataBinding:
             value=selected_checkpoint.display_name), gr.update(value=prompt), gr.update(value=neg_prompt)
 
     def update_models(self):
-        _binding.remote_model_loras =  _get_kind_from_remote_models(_binding.remote_models, "lora")
-        _binding.remote_model_checkpoints = _get_kind_from_remote_models(_binding.remote_models, "checkpoint")
-        _binding.remote_model_vaes = _get_kind_from_remote_models(_binding.remote_models, "vae")
-        _binding.remote_model_controlnet = _get_kind_from_remote_models(_binding.remote_models, "controlnet")
-      
-            
+        _binding.remote_model_loras = _get_kind_from_remote_models(
+            _binding.remote_models, "lora")
+        _binding.remote_model_checkpoints = _get_kind_from_remote_models(
+            _binding.remote_models, "checkpoint")
+        _binding.remote_model_vaes = _get_kind_from_remote_models(
+            _binding.remote_models, "vae")
+        _binding.remote_model_controlnet = _get_kind_from_remote_models(
+            _binding.remote_models, "controlnet")
 
     @staticmethod
     def _update_lora_in_prompt(prompt, _lora_names, weight=1):
@@ -325,11 +326,6 @@ def on_after_component_callback(component, **_kwargs):
     if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) == 'img2img_controlnet_ControlNet-0_controlnet_model_dropdown':
         _binding.img2img_controlnet_model_dropdown = component
 
-    # if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) == 'txt2img_cloud_inference_vae_dropdown':
-    #     _binding.txt2img_cloud_inference_vae_dropdown = component
-    # if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) == 'img2img_cloud_inference_vae_dropdown':
-    #     _binding.img2img_cloud_inference_vae_dropdown = component
-
     if _binding.txt2img_cloud_inference_checkbox and \
             _binding.img2img_cloud_inference_checkbox and \
             _binding.txt2img_cloud_inference_model_dropdown and \
@@ -347,10 +343,6 @@ def on_after_component_callback(component, **_kwargs):
 
         sync_two_component(_binding.txt2img_cloud_inference_suggest_prompts_checkbox,
                            _binding.img2img_cloud_inference_suggest_prompts_checkbox, 'change')
-        # sync_two_component(_binding.txt2img_cloud_inference_vae_dropdown,
-        #    _binding.img2img_cloud_inference_vae_dropdown,
-        #    'select'
-        #    )
 
         sync_cloud_inference_checkbox(_binding.txt2img_cloud_inference_checkbox,
                                       _binding.img2img_cloud_inference_checkbox, _binding.txt2img_generate, _binding.img2img_generate, _binding.txt2img_controlnet_model_dropdown, _binding.img2img_controlnet_model_dropdown)
@@ -373,14 +365,7 @@ def sync_cloud_model(a, b):
             b = a
 
         target_model = _binding.remote_model_checkpoints[b]
-        # TODO
-        if target_model.kind == 'lora' and target_model.dependency_model_name != None:
-            for model in _binding.remote_models:
-                if model.name == target_model.dependency_model_name:
-                    b = model.display_name
-                    break
-        elif target_model.kind == 'checkpoint':
-            b = target_model.display_name
+        b = target_model.display_name
 
         return _binding.remote_model_checkpoints[a].display_name, b
     getattr(a, "select")(fn=mirror, inputs=[a, b], outputs=[a, b])
@@ -400,25 +385,6 @@ def sync_cloud_inference_checkbox(txt2img_checkbox, img2img_checkbox, txt2img_ge
             button_text = "Generate (cloud)"
         else:
             _binding.remote_inference_enabled = False
-
-        # TODO
-        # controlnet_models = [
-        #     "None",
-        #     "[cloud] control_v11e_sd15_ip2p",
-        #     "[cloud] control_v11e_sd15_shuffle",
-        #     "[cloud] control_v11f1e_sd15_tile",
-        #     "[cloud] control_v11f1p_sd15_depth",
-        #     "[cloud] control_v11p_sd15_canny",
-        #     "[cloud] control_v11p_sd15_inpaint",
-        #     "[cloud] control_v11p_sd15_lineart",
-        #     "[cloud] control_v11p_sd15_mlsd",
-        #     "[cloud] control_v11p_sd15_normalbae",
-        #     "[cloud] control_v11p_sd15_openpose",
-        #     "[cloud] control_v11p_sd15_scribble",
-        #     "[cloud] control_v11p_sd15_seg",
-        #     "[cloud] control_v11p_sd15_softedge",
-        #     "[cloud] control_v11p_sd15s2_lineart_anime",
-        # ]
 
         controlnet_models = ["None"] + \
             [_.name for _ in _binding.remote_model_controlnet]

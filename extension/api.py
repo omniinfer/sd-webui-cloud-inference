@@ -278,7 +278,8 @@ class OmniinferAPI(BaseAPI):
 
             buffered = io.BytesIO()
             i.save(buffered, format=live_previews_image_format, **save_kwargs)
-            base64_image = base64.b64encode(buffered.getvalue()).decode('ascii')
+            base64_image = base64.b64encode(
+                buffered.getvalue()).decode('ascii')
             images_base64.append(base64_image)
 
         def _req(p: processing.StableDiffusionProcessingImg2Img, controlnet_units):
@@ -291,7 +292,7 @@ class OmniinferAPI(BaseAPI):
                 "cfg_scale": p.image_cfg_scale,
                 "mask_blur": p.mask_blur_x,
                 "inpainting_fill": p.inpainting_fill,
-                "inpaint_full_res": p.inpaint_full_res,
+                "inpaint_full_res": bool2int(p.inpaint_full_res),
                 "inpaint_full_res_padding": p.inpaint_full_res_padding,
                 "inpainting_mask_invert": p.inpainting_mask_invert,
                 "initial_noise_multiplier": p.initial_noise_multiplier,
@@ -459,10 +460,12 @@ class OmniinferAPI(BaseAPI):
                     first_image_meta = item['civitai_images'][0]['meta']
                     model.example = StableDiffusionModelExample(
                         prompts=first_image_meta['prompt'],
-                        neg_prompt=first_image_meta.get('negative_prompt', None),
+                        neg_prompt=first_image_meta.get(
+                            'negative_prompt', None),
                         width=first_image_meta.get('width', None),
                         height=first_image_meta.get('height', None),
-                        sampler_name=first_image_meta.get('sampler_name', None),
+                        sampler_name=first_image_meta.get(
+                            'sampler_name', None),
                         cfg_scale=first_image_meta.get('cfg_scale', None),
                         seed=first_image_meta.get('seed', None),
                         preview=first_image.get('url', None)
@@ -492,7 +495,6 @@ class OmniinferAPI(BaseAPI):
             if model.dependency_model_name is not None:
                 if m.get(model.dependency_model_name) is not None:
                     m[model.dependency_model_name].append_child(model.name)
-
 
         self.__class__.update_models_to_config(sd_models)
         self._models = sd_models
@@ -532,7 +534,7 @@ def get_controlnet_arg(p: processing.StableDiffusionProcessing):
 
         controlnet_arg = {}
         controlnet_arg['weight'] = c.weight
-        controlnet_arg['model'] = c.model.strip("[cloud] ")
+        controlnet_arg['model'] = c.model
         controlnet_arg['module'] = c.module
         if c.resize_mode == "Just Resize":
             controlnet_arg['resize_mode'] = 0
@@ -572,8 +574,8 @@ def get_controlnet_arg(p: processing.StableDiffusionProcessing):
                 controlnet_arg['input_image'] = image_to_base64(
                     Image.fromarray(c.image["image"]))
 
-                if len(controlnet_batchs) <= 1:
-                    controlnet_batchs.append([])
+                if len(controlnet_batchs) == 0:
+                    controlnet_batchs = [[]]
 
                 controlnet_batchs[0].append(controlnet_arg)
 
@@ -616,3 +618,8 @@ def retrieve_images(img_urls):
     ret = [r.get() for r in applied]
     return [_ for _ in ret if _ is not None]
 
+
+def bool2int(b):
+    if isinstance(b, bool):
+        return 1 if b else 0
+    return b
