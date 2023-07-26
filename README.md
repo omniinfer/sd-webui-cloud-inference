@@ -17,18 +17,32 @@ This extension enables faster image generation without the need for expensive GP
 2. **No need to change your workflow**, compatible with the usage and scripts of sd-webui, such as X/Y/Z Plot, Prompt from file, etc.
 3. **Support for 10000+ Checkpoint models**, don't need download
 
+## Compatibility and Limitations
+
+| Feature                    | Compatibility | Limitations |
+| -------------------------- | ------------- | ----------- |
+| txt2img                    | ✅✅✅           | 🚫 Hires.fix |
+| txt2img_controlnet         | ✅✅✅✅✅         | 🚫 Hires.fix |
+| img2img                    | ✅✅✅           | 🚫 Tiling    |
+| img2img_inpaint            | ✅✅✅           |             |
+| img2img_controlnet         | ✅✅✅✅✅         | 🚫 Hires.fix |
+| vae model                  | ✅✅✅✅✅         |             |
+| scripts - X/Y/Z plot       | ✅✅✅✅✅         |             |
+| scripts - Prompt matrix    | ✅✅✅✅✅         |             |
+| scripts - Prompt from file | ✅✅✅✅✅         |             |
+
 
 
 ## How it works
 
 ![how it works](./docs/how-it-works.png)
-
 ## Guide
-
 ## 1. Install sd-webui-cloud-inference
 
-<img width="1512" alt="image" src="https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/2bc8c7b2-4ea6-447a-a82f-89ffb45eb45e">
-<img width="1512" alt="image" src="https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/f0c43b34-6feb-4d84-ba4e-1afa97abf31e">
+![image-mh (4)](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/d187c9b2-ab64-40bf-8327-443db6a322c6)
+![Screenshot 2023-07-26 at 14 40 49-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/6c2d491d-b056-4f9a-b955-2a0b93c6afc4)
+![Screenshot 2023-07-26 at 14 44 10-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/1b8ec05a-2ec2-4da8-a0c8-bd10ac01e626)
+
 
 ## 2. Get your [omniinfer.io](https://www.omniinfer.io/user/login?utm_source=github_wiki) Key
 
@@ -37,26 +51,22 @@ Open [omniinfer.io](https://www.omniinfer.io/user/login?utm_source=github_wiki) 
 We can choice "Google Login" or "Github Login"
 <img width="1512" alt="image" src="https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/5dd02f42-f824-402e-99d7-8fd0ecc8776f">
 
-<img width="1512" alt="image" src="https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/05db40e4-ba65-4a9d-baed-bcbb17c6f605">
+![Screenshot 2023-07-26 at 14 44 10-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/ae71a189-4d7c-4aea-a32f-d3a375b94b72)
 
-<img width="1512" alt="image" src="https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/74973595-c022-4fd3-aabd-44199b47a1f7">
-
-<img width="1234" alt="image" src="https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/4fe56d2d-54cd-41d0-8c5c-93647302e961">
 
 
 ## 3. Enable Cloud Inference feature
 
 Let us back to `Cloud Inference` tab of stable-diffusion-webui 
 
-<img width="1508" alt="image" src="https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/3b91e85c-cafc-4eb2-86b4-b350c0f073cd">
+![Screenshot 2023-07-26 at 14 46 59-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/3917f085-51b3-4ad2-8a84-539d074bf63a)
 
 ## 4. Test Txt2Img
 
 Let us back to `Txt2Img` tab of stable-diffusion-webui
 
 
-<img width="1512" alt="image" src="https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/a947bcc5-93e2-436b-beb8-b72f79523c29">
-
+![Screenshot 2023-07-26 at 14 51 27-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/cf2934d3-c5eb-4f7f-9485-04fafb832bbc)
 From now on, you can give it a try and enjoy your creative journey.
 
 Furthermore, you are welcome to freely discuss your user experience, share suggestions, and provide feedback on our Discord channel.
@@ -65,22 +75,21 @@ Furthermore, you are welcome to freely discuss your user experience, share sugge
 
 ## 5. Advanced - Lora
 
-<img width="1714" alt="image" src="https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/ddfc0578-fac6-48a6-a765-a12fb06ecfe4">
-
-## 6. Advanced - Lora with X/Y/Z
-
-<img width="1714" alt="image" src="https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/c0c72f3e-b915-4579-b0f9-b3a6d1c3ba73">
+![Screenshot 2023-07-26 at 14 58 33-mh (1)](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/ebf4b5c9-189a-483c-b688-3bb2a19dbe8b)
 
 
+## 7. Advanced - Img2img Inpainting
+![image-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/6681b6d8-9d3e-45c0-bfe3-57fad26cc5e6)
+![Screenshot 2023-07-25 at 21 08 28-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/286e45dc-ca3e-419a-98da-15d298f32e07)
+![image-mh (4)](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/ed1d9d41-e0bf-4635-8423-ada83f03359e)
+## 8. Advanced - VAE
 
-## Compatibility and Limitations
+![image](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/86abe84f-c34d-4e8d-8edc-920b6aaae050)
 
-| Feature                    | Compatibility | Limitations                                                                   |
-| -------------------------- | ------------- | ----------------------------------------------------------------------------- |
-| txt2img                    | ✅✅✅           | 🚫 Hires.fix, Tiling, restore face                                             |
-| txt2img_controlnet         | ✅✅✅           | 🚫 Hires.fix, Tiling, restore face, Ending Control Step, Starting Control Step |
-| img2img                    | ✅✅✅           | 🚫 Tiling, restore face                                                        |
-| img2img_controlnet         | ✅✅✅           | 🚫 Hires.fix, Tiling, restore face, Ending Control Step, Starting Control Step |
-| scripts - X/Y/Z plot       | ✅✅✅✅✅         | 🚫 Checkpoint name                                                             |
-| scripts - Prompt matrix    | ✅✅✅✅✅         |                                                                               |
-| scripts - Prompt from file | ✅✅✅✅✅         |                                                                               |
+or you can use the VAE feature with X/Y/Z
+
+![Screenshot 2023-07-25 at 22 35 30-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/3dcb44df-c5a7-4fae-805d-5f69a1f2fb6e)
+
+
+## 9. Advanced - ControlNet
+![image-mh (2)](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/cd7ed643-831c-4999-94a1-9f9668e080cc)![Screenshot 2023-07-25 at 22 23 01-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/db74e466-5e7f-421f-b33c-09802f5ee2c5)
