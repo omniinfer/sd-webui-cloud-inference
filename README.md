@@ -70,7 +70,7 @@ Let us back to `Txt2Img` tab of stable-diffusion-webui
 From now on, you can give it a try and enjoy your creative journey.
 
 Furthermore, you are welcome to freely discuss your user experience, share suggestions, and provide feedback on our Discord channel.
-<br>​[![](https://dcbadge.vercel.app/api/server/kJCEK9zf)](https://discord.gg/kJCEK9zf)
+[![](https://dcbadge.vercel.app/api/server/nzqq8UScpx)](https://discord.gg/nzqq8UScpx)
 
 
 ## 5. Advanced - Lora
