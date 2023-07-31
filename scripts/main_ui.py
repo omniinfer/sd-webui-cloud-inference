@@ -67,8 +67,8 @@ class DataBinding:
         self.default_remote_model = None
         self.initialized = False
 
-    def on_selected_model(self, name_index: int, suggest_prompts_enabled, prompt: str, neg_prompt: str):
-        selected: api.StableDiffusionModel = self.remote_model_checkpoints[name_index]
+    def on_selected_model(self, name_index: int, selected_loras: list[str], suggest_prompts_enabled, prompt: str, neg_prompt: str):
+        selected: api.StableDiffusionModel = self.find_model_by_display_name(name_index)
         selected_checkpoint = selected
 
         # name = self.remote_sd_models[name_index].name
@@ -79,12 +79,16 @@ class DataBinding:
             if selected.example.prompts is not None and suggest_prompts_enabled:
                 prompt = selected.example.prompts
                 prompt = prompt.replace("\n", "")
+                if len(selected_loras) > 0:
+                    prompt = self._update_lora_in_prompt(
+                        selected.example.prompts, selected_loras)
+
             if selected.example.neg_prompt is not None and suggest_prompts_enabled:
                 neg_prompt = selected.example.neg_prompt
 
         return gr.Dropdown.update(
             choices=[_.display_name for _ in self.remote_model_checkpoints],
-            value=selected_checkpoint.display_name), gr.update(value=prompt), gr.update(value=neg_prompt)
+            value=selected_checkpoint.display_name), gr.update(value=selected_loras), gr.update(value=prompt), gr.update(value=neg_prompt)
 
     def update_models(self):
         _binding.remote_model_loras = _get_kind_from_remote_models(
@@ -200,7 +204,6 @@ class CloudInferenceScript(scripts.Script):
                     choices=[
                         _.display_name for _ in _binding.remote_model_checkpoints],
                     value=lambda: _binding.default_remote_model,
-                    type="index",
                     elem_id="{}_cloud_inference_model_dropdown".format(tabname))
 
                 refresh_button = ToolButton(
@@ -239,6 +242,7 @@ class CloudInferenceScript(scripts.Script):
                 fn=_binding.on_selected_model,
                 inputs=[
                     cloud_inference_model_dropdown,
+                    cloud_inference_lora_dropdown,
                     cloud_inference_suggest_prompts_checkbox,
                     getattr(_binding, "{}_prompt".format(tabname)),
                     getattr(_binding, "{}_neg_prompt".format(tabname))
@@ -246,6 +250,7 @@ class CloudInferenceScript(scripts.Script):
                 ],
                 outputs=[
                     cloud_inference_model_dropdown,
+                    cloud_inference_lora_dropdown,
                     getattr(_binding, "{}_prompt".format(tabname)),
                     getattr(_binding, "{}_neg_prompt".format(tabname))
                 ])
@@ -263,7 +268,6 @@ class CloudInferenceScript(scripts.Script):
 
             def _model_refresh():
                 api.get_instance().refresh_models()
-                # TODO: fix name_index out of range
                 _binding.remote_models = api.get_instance().list_models()
                 _binding.update_models()
 
@@ -363,11 +367,7 @@ def sync_cloud_model(a, b):
     def mirror(a, b):
         if a != b:
             b = a
-
-        target_model = _binding.remote_model_checkpoints[b]
-        b = target_model.display_name
-
-        return _binding.remote_model_checkpoints[a].display_name, b
+        return a, b
     getattr(a, "select")(fn=mirror, inputs=[a, b], outputs=[a, b])
     getattr(b, "select")(fn=mirror, inputs=[b, a], outputs=[b, a])
 
