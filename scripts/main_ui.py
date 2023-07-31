@@ -68,7 +68,7 @@ class DataBinding:
         self.initialized = False
 
     def on_selected_model(self, name_index: int, suggest_prompts_enabled, prompt: str, neg_prompt: str):
-        selected: api.StableDiffusionModel = self.remote_model_checkpoints[name_index]
+        selected: api.StableDiffusionModel = self.find_model_by_display_name(name_index)
         selected_checkpoint = selected
 
         # name = self.remote_sd_models[name_index].name
@@ -200,7 +200,6 @@ class CloudInferenceScript(scripts.Script):
                     choices=[
                         _.display_name for _ in _binding.remote_model_checkpoints],
                     value=lambda: _binding.default_remote_model,
-                    type="index",
                     elem_id="{}_cloud_inference_model_dropdown".format(tabname))
 
                 refresh_button = ToolButton(
@@ -263,7 +262,6 @@ class CloudInferenceScript(scripts.Script):
 
             def _model_refresh():
                 api.get_instance().refresh_models()
-                # TODO: fix name_index out of range
                 _binding.remote_models = api.get_instance().list_models()
                 _binding.update_models()
 
@@ -363,11 +361,7 @@ def sync_cloud_model(a, b):
     def mirror(a, b):
         if a != b:
             b = a
-
-        target_model = _binding.remote_model_checkpoints[b]
-        b = target_model.display_name
-
-        return _binding.remote_model_checkpoints[a].display_name, b
+        return a, b
     getattr(a, "select")(fn=mirror, inputs=[a, b], outputs=[a, b])
     getattr(b, "select")(fn=mirror, inputs=[b, a], outputs=[b, a])
 

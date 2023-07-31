@@ -137,7 +137,7 @@ class _HijackManager(object):
             raise Exception(
                 'process_images: first argument must be a processing object')
 
-        remote_inference_enabled, selected_checkpoint_index, selected_vae_name = get_visible_extension_args(
+        remote_inference_enabled, selected_checkpoint_name, selected_vae_name = get_visible_extension_args(
             p, 'cloud inference')
 
         if not remote_inference_enabled:
@@ -158,7 +158,7 @@ class _HijackManager(object):
             p._cloud_inference_settings = {}
 
         if 'sd_checkpoint' not in p._cloud_inference_settings:
-            p._cloud_inference_settings['sd_checkpoint'] = self._binding.remote_model_checkpoints[selected_checkpoint_index].name
+            p._cloud_inference_settings['sd_checkpoint'] = self._binding.find_model_by_display_name(selected_checkpoint_name).name
         if 'sd_vae' not in p._cloud_inference_settings:
             p._cloud_inference_settings['sd_vae'] = selected_vae_name
 
