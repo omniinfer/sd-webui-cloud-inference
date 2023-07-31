@@ -67,7 +67,7 @@ class DataBinding:
         self.default_remote_model = None
         self.initialized = False
 
-    def on_selected_model(self, name_index: int, suggest_prompts_enabled, prompt: str, neg_prompt: str):
+    def on_selected_model(self, name_index: int, selected_loras: list[str], suggest_prompts_enabled, prompt: str, neg_prompt: str):
         selected: api.StableDiffusionModel = self.find_model_by_display_name(name_index)
         selected_checkpoint = selected
 
@@ -79,12 +79,16 @@ class DataBinding:
             if selected.example.prompts is not None and suggest_prompts_enabled:
                 prompt = selected.example.prompts
                 prompt = prompt.replace("\n", "")
+                if len(selected_loras) > 0:
+                    prompt = self._update_lora_in_prompt(
+                        selected.example.prompts, selected_loras)
+
             if selected.example.neg_prompt is not None and suggest_prompts_enabled:
                 neg_prompt = selected.example.neg_prompt
 
         return gr.Dropdown.update(
             choices=[_.display_name for _ in self.remote_model_checkpoints],
-            value=selected_checkpoint.display_name), gr.update(value=prompt), gr.update(value=neg_prompt)
+            value=selected_checkpoint.display_name), gr.update(value=selected_loras), gr.update(value=prompt), gr.update(value=neg_prompt)
 
     def update_models(self):
         _binding.remote_model_loras = _get_kind_from_remote_models(
@@ -238,6 +242,7 @@ class CloudInferenceScript(scripts.Script):
                 fn=_binding.on_selected_model,
                 inputs=[
                     cloud_inference_model_dropdown,
+                    cloud_inference_lora_dropdown,
                     cloud_inference_suggest_prompts_checkbox,
                     getattr(_binding, "{}_prompt".format(tabname)),
                     getattr(_binding, "{}_neg_prompt".format(tabname))
@@ -245,6 +250,7 @@ class CloudInferenceScript(scripts.Script):
                 ],
                 outputs=[
                     cloud_inference_model_dropdown,
+                    cloud_inference_lora_dropdown,
                     getattr(_binding, "{}_prompt".format(tabname)),
                     getattr(_binding, "{}_neg_prompt".format(tabname))
                 ])
