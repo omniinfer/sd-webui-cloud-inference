@@ -1,24 +1,24 @@
 import modules.scripts as scripts
 import os
 import sys
-import gradio as gr
 import importlib
 
-from modules import images, script_callbacks, errors, processing, ui, shared
+from modules import images, script_callbacks, errors, processing, ui, shared, scripts_postprocessing, generation_parameters_copypaste, ui_common
 from modules.processing import Processed, StableDiffusionProcessingImg2Img, StableDiffusionProcessingTxt2Img, StableDiffusionProcessing
 from modules.shared import opts, state, prompt_styles
-from collections import OrderedDict
 from extension import api
 
 from inspect import getmembers, isfunction, ismodule
 import random
 
+from PIL import Image
+
 
 class _HijackManager(object):
 
     def __init__(self):
-        self._hijacked = False
-        self._xyz_hijacked = False
+        self._hijacked_onload = False
+        self._hijacked_on_app_started = False
         self._binding = None
 
         self.hijack_map = {}
@@ -42,19 +42,24 @@ class _HijackManager(object):
         print('[cloud-inference] hijack {}, old: <{}>, new: <{}>'.format(
             name, old_fn.__module__ + '.' + old_fn.__name__, new_fn.__module__ + '.' + new_fn.__name__))
 
-    def hijack_all(self, *args, **kwargs):
-        if self._hijacked:
+    def hijack_onload(self):
+        if self._hijacked_onload:
             return
+        self.hijack_one('modules.processing.process_images', self._hijack_process_images)
+        self.hijack_one('modules.postprocessing.run_postprocessing', self._hijack_run_postprocessing)
+        self._apply_xyz()
+        self._hijacked_onload = True
 
-        self.hijack_one('modules.processing.process_images',
-                        self._hijack_process_images)
+    def hijack_on_app_started(self, *args, **kwargs):
+        if self._hijacked_on_app_started:
+            return
+        
         self.hijack_one('extensions.sd-webui-controlnet.scripts.global_state.update_cn_models', self._hijack_update_cn_models)
-        print('[cloud-inference] hijack finished')
+        self._hijack_update_cn_models() # update once
+
+        self._hijacked_on_app_started = True
 
     def _apply_xyz(self):
-        if self._xyz_hijacked:
-            return
-
         def find_module(module_names):
             if isinstance(module_names, str):
                 module_names = [s.strip() for s in module_names.split(",")]
@@ -70,19 +75,14 @@ class _HijackManager(object):
                 if '_cloud_inference_settings' not in p.__dict__:
                     p._cloud_inference_settings = {}
 
-                m = self._binding.choice_to_model(opt)
-                # if m.kind == 'lora':
-                #     p._cloud_inference_settings['sd_checkpoint'] = m.dependency_model_name
-                #     p.prompt = self._binding._update_lora_in_prompt(
-                #         p.prompt, m.name)
-                # else:
+                m = self._binding.find_model_by_alias(opt)
                 p._cloud_inference_settings['sd_checkpoint'] = m.name
 
             def xyz_checkpoint_confirm(p, opt):
                 return
 
             def xyz_checkpoint_format(p, opt, v):
-                return self._binding.choice_to_model(v).name.rsplit(".", 1)[0]
+                return self._binding.find_model_by_alias(v).name.rsplit(".", 1)[0]
 
             def xyz_vae_apply(p: StableDiffusionProcessing, opt, v):
                 if '_cloud_inference_settings' not in p.__dict__:
@@ -103,7 +103,7 @@ class _HijackManager(object):
                                     apply=xyz_checkpoint_apply,
                                     confirm=xyz_checkpoint_confirm,
                                     format_value=xyz_checkpoint_format,
-                                    choices=lambda: [_.display_name for _ in self._binding.remote_model_checkpoints]))
+                                    choices=lambda: [_.alias for _ in self._binding.remote_model_checkpoints]))
             xyz_grid.axis_options.append(
                 xyz_grid.AxisOption('[Cloud Inference] VAE',
                                     str,
@@ -137,8 +137,7 @@ class _HijackManager(object):
             raise Exception(
                 'process_images: first argument must be a processing object')
 
-        remote_inference_enabled, selected_checkpoint_name, selected_vae_name = get_visible_extension_args(
-            p, 'cloud inference')
+        remote_inference_enabled, selected_checkpoint_name, selected_vae_name = get_visible_extension_args(p, 'cloud inference')
 
         if not remote_inference_enabled:
             return self.hijack_map['modules.processing.process_images']['old'](*args, **kwargs)
@@ -151,14 +150,13 @@ class _HijackManager(object):
         state.sampling_steps = p.steps
         state.job_count = p.n_iter
 
-        state.textinfo = "remote inferencing ({})".format(
-            api.get_instance().__class__.__name__)
+        state.textinfo = "remote inferencing ({})".format(api.get_instance().__class__.__name__)
 
         if '_cloud_inference_settings' not in p.__dict__:
             p._cloud_inference_settings = {}
 
         if 'sd_checkpoint' not in p._cloud_inference_settings:
-            p._cloud_inference_settings['sd_checkpoint'] = self._binding.find_model_by_display_name(selected_checkpoint_name).name
+            p._cloud_inference_settings['sd_checkpoint'] = self._binding.find_model_by_alias(selected_checkpoint_name).name
         if 'sd_vae' not in p._cloud_inference_settings:
             p._cloud_inference_settings['sd_vae'] = selected_vae_name
 
@@ -264,6 +262,123 @@ class _HijackManager(object):
             infotexts=infotexts)
         state.end()
         return p
+
+    def _hijack_run_postprocessing(self, *args, **kwargs):
+        if not self._binding.remote_inference_enabled:
+            return self.hijack_map['modules.postprocessing.run_postprocessing']['old'](*args, **kwargs)
+
+        shared.state.begin(job="extras")
+        shared.state.textinfo = "remote inferencing ({})".format(api.get_instance().__class__.__name__)
+
+        image_data = []
+        image_names = []
+        outputs = []
+
+        # extras_mode, image, image_folder, input_dir, output_dir, show_extras_results, *args, save_output: bool = True
+        extras_mode = args[0]
+        image = args[1]
+        image_folder = args[2]
+        input_dir = args[3]
+        output_dir = args[4]
+        show_extras_results = args[5]
+        if len(args) > 6:
+            args = args[6:]
+        save_output = kwargs.get('save_output', True)
+
+        if extras_mode == 1:
+            for img in image_folder:
+                if isinstance(img, Image.Image):
+                    image = img
+                    fn = ''
+                else:
+                    image = Image.open(os.path.abspath(img.name))
+                    fn = os.path.splitext(img.orig_name)[0]
+                image_data.append(image)
+                image_names.append(fn)
+        elif extras_mode == 2:
+            assert not shared.cmd_opts.hide_ui_dir_config, '--hide-ui-dir-config option must be disabled'
+            assert input_dir, 'input directory not selected'
+
+            image_list = shared.listfiles(input_dir)
+            for filename in image_list:
+                try:
+                    image = Image.open(filename)
+                except Exception:
+                    continue
+                image_data.append(image)
+                image_names.append(filename)
+        else:
+            assert image, 'image not selected'
+
+            image_data.append(image)
+            image_names.append(None)
+
+        if extras_mode == 2 and output_dir != '':
+            outpath = output_dir
+        else:
+            outpath = opts.outdir_samples or opts.outdir_extras_samples
+
+        infotext = ''
+
+        for image, name in zip(image_data, image_names):
+            shared.state.textinfo = name
+
+            parameters, existing_pnginfo = images.read_info_from_image(image)
+            if parameters:
+                existing_pnginfo["parameters"] = parameters
+
+            # api.get_instance().txt2img
+            # scripts.scripts_postproc.run(pp, args)
+            resize_mode, \
+                upscaling_resize, \
+                upscaling_resize_w, \
+                upscaling_resize_h, \
+                upscaling_crop, \
+                extras_upscaler_1, \
+                extras_upscaler_2, \
+                extras_upscaler_2_visibility, \
+                gfpgan_visibility, codeformer_visibility, \
+                codeformer_weight, *extra_args = args
+
+            if extras_upscaler_1 and extras_upscaler_1 != 'None':
+                extras_upscaler_1 = self._binding.find_name_by_alias(extras_upscaler_1)
+            if extras_upscaler_2 and extras_upscaler_2 != 'None':
+                extras_upscaler_2 = self._binding.find_name_by_alias(extras_upscaler_2)
+
+            imgs = api.get_instance().upscale(image,
+                                              resize_mode,
+                                              upscaling_resize,
+                                              upscaling_resize_w,
+                                              upscaling_resize_h,
+                                              upscaling_crop,
+                                              extras_upscaler_1,
+                                              extras_upscaler_2,
+                                              extras_upscaler_2_visibility,
+                                              gfpgan_visibility,
+                                              codeformer_visibility,
+                                              codeformer_weight,
+                                              *extra_args)
+            pp = scripts_postprocessing.PostprocessedImage(imgs[0].convert("RGB"))
+
+            if opts.use_original_name_batch and name is not None:
+                basename = os.path.splitext(os.path.basename(name))[0]
+            else:
+                basename = ''
+
+            infotext = ", ".join([k if k == v else f'{k}: {generation_parameters_copypaste.quote(v)}' for k, v in pp.info.items() if v is not None])
+
+            if opts.enable_pnginfo:
+                pp.image.info = existing_pnginfo
+                pp.image.info["postprocessing"] = infotext
+
+            if save_output:
+                images.save_image(pp.image, path=outpath, basename=basename, seed=None, prompt=None, extension=opts.samples_format, info=infotext,
+                                  short_filename=True, no_prompt=True, grid=False, pnginfo_section_name="extras", existing_info=existing_pnginfo, forced_filename=None)
+
+            if extras_mode != 2 or show_extras_results:
+                outputs.append(pp.image)
+
+        return outputs, ui_common.plaintext_to_html(infotext), ''
 
 
 def create_infotext(p,
@@ -399,12 +514,10 @@ def _hijack_func(module_name, func_name, new_func):
 
                     if replace:
                         if name == func_name:
-                            print(
-                                '[cloud-inference] reloading {} - {}'.format(script.module.__name__, func_name))
+                            print('[cloud-inference] reloading {} - {}'.format(script.module.__name__, func_name))
                             setattr(script.module, name, new_func)
                         else:
-                            print(
-                                '[cloud-inference] reloading {} - {}'.format(script.module.__name__, name))
+                            print('[cloud-inference] reloading {} - {}'.format(script.module.__name__, name))
                             t = getattr(script.module, name)
                             setattr(t, func_name, new_func)
                             # setattr(script.module, name, t)  # ?

@@ -4,12 +4,18 @@ import io
 import base64
 from modules import sd_samplers, processing
 from modules.shared import opts, state
-from PIL import Image
+from PIL import Image, ImageFilter, ImageOps
 from multiprocessing.pool import ThreadPool
-import random
+
+from omniinfer_client import *
+
+import numpy as np
+
 import os
 import copy
 import json
+
+
 from .utils import image_to_base64, read_image_files
 from .version import __version__
 
@@ -39,6 +45,11 @@ class BaseAPI(object):
         pass
 
 
+class UpscaleAPI(object):
+    def upscale(self, *args, **kwargs):
+        pass
+
+
 class StableDiffusionModel(object):
     def __init__(self,
                  kind,
@@ -46,8 +57,7 @@ class StableDiffusionModel(object):
                  rating=0,
                  tags=None,
                  child=None,
-                 example=None,
-                 dependency_model_name=None,
+                 examples=None,
                  user_tags=None):
         self.kind = kind  # checkpoint, lora
         self.name = name
@@ -64,15 +74,18 @@ class StableDiffusionModel(object):
         if self.child is None:
             self.child = []
 
-        self.example = example
-        self.dependency_model_name = dependency_model_name
+        self.examples = examples
 
     def append_child(self, child):
         self.child.append(child)
 
     @property
-    def display_name(self):
+    def alias(self):
         # format -> [<ckpt/lora>] [<tag>] <name>
+        if self.kind in ["upscaler", "controlnet"]:
+            return self.name
+            # return "cloud://{}".format(self.name)
+
         n = ""
         if len(self.tags) > 0:
             n = "[{}] ".format(",".join(self.tags))
@@ -112,15 +125,20 @@ class StableDiffusionModelExample(object):
         self.preview = preview
 
 
-class OmniinferAPI(BaseAPI):
+class OmniinferAPI(BaseAPI, UpscaleAPI):
 
-    def __init__(self, token=None):
-        self._token = None
-        if self._token is not None:
-            self._token = token
-        self._models = None
-        self._session = requests.Session()
-        self._session.headers.update({'User-Agent': _user_agent()})
+    def __init__(self, api_key=None):
+        self._api_key = api_key
+        self._client: OmniClient = None
+
+        if self._api_key is not None:
+            self.update_client()
+
+        self._models: List[StableDiffusionModel] = []
+
+    def update_client(self):
+        self._client = OmniClient(self._api_key)
+        self._client.set_extra_headers({'User-Agent': _user_agent()})
 
     @classmethod
     def load_from_config(cls):
@@ -133,42 +151,13 @@ class OmniinferAPI(BaseAPI):
 
         o = OmniinferAPI()
         if config.get('key') is not None:
-            o._token = config['key']
-        try:
-            if config.get('models') is not None:
-                o._models = []
-                for model in config['models']:
-                    if model.get('example'):
-                        model['example'] = StableDiffusionModelExample(
-                            **model['example'])
-                    o._models.append(StableDiffusionModel(**model))
-        except Exception as e:
-            print(
-                '[cloud-inference] failed to load models from config file, we will create a new one'
-            )
+            o._api_key = config['key']
+            o.update_client()
+        else:
+            # if no key, we will set it to NONE
+            o._api_key = 'NONE'
+            o.update_client()
         return o
-
-    @classmethod
-    def update_models_to_config(cls, models):
-        config = {}
-        if os.path.exists(OMNIINFER_CONFIG):
-            with open(OMNIINFER_CONFIG, 'r') as f:
-                try:
-                    config = json.load(f)
-                except:
-                    print(
-                        '[cloud-inference] failed to load config file, we will create a new one'
-                    )
-                    pass
-
-        config['models'] = []
-        with open(OMNIINFER_CONFIG, 'wb+') as f:
-            for model in models:
-                config['models'].append(model.to_json())
-
-            f.write(
-                json.dumps(config, ensure_ascii=False, indent=2,
-                           default=vars).encode('utf-8'))
 
     @classmethod
     def update_key_to_config(cls, key):
@@ -190,69 +179,40 @@ class OmniinferAPI(BaseAPI):
                            default=vars).encode('utf-8'))
 
     @classmethod
-    def test_connection(cls, token):
-        if token == "":
-            raise Exception("Token is empty")
-        res = requests.get('{}/v2/progress'.format(OMNIINFER_API_ENDPOINT),
-                           params={'key': token})
-        if res.status_code >= 400:
-            raise Exception("Request failed: {}".format(res.text))
-        if res.json()['code'] == 4:
-            raise Exception("Request failed: {}".format(res.text))
+    def test_connection(cls, api_key: str):
+        client = OmniClient(api_key)
+        try:
+            res = client.progress("sd-webui-test")
+        except Exception as e:
+            raise Exception("Failed to connect to Omniinfer API: {}".format(e))
+        if res.code == ProgressResponseCode.INVALID_AUTH:
+            raise Exception("Invalid API key")
+        return "✅ Omniinfer Ready... now you can inference on cloud"
 
-        return "Omniinfer Ready... now you can inference on cloud"
+    def _update_state(self, progress: ProgressResponse):
+        # queue(0-10), generating(10-90), downloading(90-100)
+        if state.skipped or state.interrupted:
+            raise Exception("Interrupted")
 
-    def _wait_task_completed(self, task_id):
-        STATUS_CODE_PENDING = 0
-        STATUS_CODE_PROGRESSING = 1
-        STATUS_CODE_SUCCESS = 2
-        STATUS_CODE_FAILED = 3
-        STATUS_CODE_TIMEOUT = 4
+        progress_data = progress.data
 
-        attempts = 300
+        if progress_data.status == ProgressResponseStatusCode.RUNNING:
+            global_progress = (0.7 * progress_data.progress)
+            if global_progress < 0.1:
+                global_progress = 0.1
 
-        # queue(0-20), generating(20-90), downloading(90-100)
-        global_progress = 0
-        while attempts > 0:
-            if state.skipped or state.interrupted:
-                raise Exception("Interrupted")
+            if global_progress >= 0.9:
+                global_progress = 0.9  # reverse download time
+        if progress_data.status == ProgressResponseStatusCode.INITIALIZING:
+            global_progress = 0.1
+        elif progress_data.status == ProgressResponseStatusCode.SUCCESSFUL:
+            global_progress = 0.9
+        elif progress_data.status == ProgressResponseStatusCode.TIMEOUT:
+            raise Exception("failed to generate image: timeout")
+        elif progress_data.status == ProgressResponseStatusCode.FAILED:
+            raise Exception("failed to generate image({}): {}", progress.data.failed_reason)
 
-            task_res = self._session.get(
-                "{}/v2/progress".format(OMNIINFER_API_ENDPOINT),
-                params={
-                    "key": self._token,
-                    "task_id": task_id,
-                    'Accept-Encoding': 'gzip, deflate',
-                },
-                headers={"X-OmniInfer-Source": "sd-webui"})
-
-            task_res_json = task_res.json()
-            generate_progress = task_res_json["data"]["progress"]
-
-            status_code = task_res_json["data"]["status"]
-
-            if status_code == STATUS_CODE_PROGRESSING:
-                global_progress += (0.7 * generate_progress)
-                if global_progress >= 0.9:
-                    global_progress = 0.9  # reverse download time
-            if status_code == STATUS_CODE_PENDING and global_progress < 0.2:
-                global_progress += 0.05
-            elif status_code == STATUS_CODE_SUCCESS:
-                return task_res_json["data"]["imgs"]
-            elif status_code == STATUS_CODE_TIMEOUT:
-                raise Exception("failed to generate image({}): timeout",
-                                task_id)
-            elif status_code == STATUS_CODE_FAILED:
-                raise Exception("failed to generate image({}): {}",
-                                task_res_json["data"]["failed_reason"])
-
-            state.sampling_step = int(state.sampling_steps * state.job_count *
-                                      global_progress)
-
-            attempts -= 1
-            time.sleep(0.5)
-
-        raise Exception("failed to generate image({}): timeout", task_id)
+        state.sampling_step = int(state.sampling_steps * state.job_count * global_progress)
 
     def img2img(
         self,
@@ -283,62 +243,37 @@ class OmniinferAPI(BaseAPI):
             images_base64.append(base64_image)
 
         def _req(p: processing.StableDiffusionProcessingImg2Img, controlnet_units):
-            req = {
-                "model_name": p._cloud_inference_settings['sd_checkpoint'],
-                "init_images": [image_to_base64(_) for _ in p.init_images],
-                "mask": image_to_base64(p.image_mask) if p.image_mask else None,
-                "resize_mode": p.resize_mode,
-                "denoising_strength": p.denoising_strength,
-                "cfg_scale": p.image_cfg_scale,
-                "mask_blur": p.mask_blur_x,
-                "inpainting_fill": p.inpainting_fill,
-                "inpaint_full_res": bool2int(p.inpaint_full_res),
-                "inpaint_full_res_padding": p.inpaint_full_res_padding,
-                "inpainting_mask_invert": p.inpainting_mask_invert,
-                "initial_noise_multiplier": p.initial_noise_multiplier,
-                "prompt": p.prompt,
-                "seed": int(p.seed) or -1,
-                "negative_prompt": p.negative_prompt,
-                "batch_size": p.batch_size,
-                "n_iter": p.n_iter,
-                "steps": p.steps,
-                "width": p.width,
-                "height": p.height,
-                "restore_faces": p.restore_faces,
-                "clip_skip": opts.CLIP_stop_at_last_layers,
-            }
+            req = Img2ImgRequest(
+                model_name=p._cloud_inference_settings['sd_checkpoint'],
+                sampler_name=p.sampler_name,
+                init_images=images_base64,
+                mask=image_to_base64(p.image_mask) if p.image_mask else None,
+                resize_mode=p.resize_mode,
+                denoising_strength=p.denoising_strength,
+                cfg_scale=p.image_cfg_scale,
+                mask_blur=p.mask_blur_x,
+                inpaint_full_res=bool2int(p.inpaint_full_res),
+                inpaint_full_res_padding=p.inpaint_full_res_padding,
+                initial_noise_multiplier=p.initial_noise_multiplier,
+                prompt=p.prompt,
+                seed=int(p.seed) or -1,
+                negative_prompt=p.negative_prompt,
+                batch_size=p.batch_size,
+                n_iter=p.n_iter,
+                width=p.width,
+                height=p.height,
+                restore_faces=p.restore_faces,
+                clip_skip=opts.CLIP_stop_at_last_layers,
+            )
             if 'CLIP_stop_at_last_layers' in p.override_settings:
-                req['clip_skip'] = p.override_settings['CLIP_stop_at_last_layers']
-
-            if 'sd_vae' in p._cloud_inference_settings:
-                req['sd_vae'] = p._cloud_inference_settings['sd_vae']
-
+                req.clip_skip = p.override_settings['CLIP_stop_at_last_layers']
+            if 'sd_vae' in p.override_settings:
+                req.model_name = p.override_settings['sd_vae']
             if len(controlnet_units) > 0:
-                req['controlnet_units'] = controlnet_units
+                req.controlnet_units = controlnet_units
 
-            headers = {
-                "accept": "application/json",
-                "content-type": "application/json",
-                'Accept-Encoding': 'gzip, deflate',
-                "X-OmniInfer-Source": _user_agent(p._cloud_inference_settings['sd_checkpoint']),
-                "X-OmniInfer-Key": self._token,
-                "User-Agent": _user_agent(p._cloud_inference_settings['sd_checkpoint'])
-            }
-
-            res = self._session.post("{}/v2/img2img".format(OMNIINFER_API_ENDPOINT),
-                                     json=req,
-                                     headers=headers,
-                                     params={"key": self._token})
-
-            try:
-                json_data = res.json()
-            except Exception:
-                raise Exception("Request failed: {}".format(res.text))
-
-            if json_data['code'] != 0:
-                raise Exception("Request failed: {}".format(res.text))
-
-            return self._wait_task_completed(json_data['data']['task_id'])
+            res = self._client.sync_img2img(req, download_images=False, callback=self._update_state)
+            return res.data.imgs
 
         controlnet_batchs = get_controlnet_arg(p)
 
@@ -354,53 +289,41 @@ class OmniinferAPI(BaseAPI):
         controlnet_batchs = get_controlnet_arg(p)
 
         def _req(p: processing.StableDiffusionProcessingTxt2Img, controlnet_units):
-            req = {
-                "model_name": p._cloud_inference_settings['sd_checkpoint'],
-                "prompt": p.prompt,
-                "negative_prompt": p.negative_prompt,
-                "sampler_name": p.sampler_name or "Euler a",
-                "batch_size": p.batch_size or 1,
-                "n_iter": p.n_iter or 1,
-                "steps": p.steps or 30,
-                "cfg_scale": p.cfg_scale or 7.5,
-                "seed": int(p.seed) or -1,
-                "height": p.height or 512,
-                "width": p.width or 512,
-                "restore_faces": p.restore_faces,
-                "clip_skip": opts.CLIP_stop_at_last_layers,
-            }
+            req = Txt2ImgRequest(
+                model_name=p._cloud_inference_settings['sd_checkpoint'],
+                sampler_name=p.sampler_name,
+                prompt=p.prompt,
+                negative_prompt=p.negative_prompt,
+                batch_size=p.batch_size,
+                n_iter=p.n_iter,
+                steps=p.steps,
+                cfg_scale=p.cfg_scale,
+                seed=int(p.seed) or -1,
+                height=p.height,
+                width=p.width,
+                restore_faces=p.restore_faces,
+                clip_skip=opts.CLIP_stop_at_last_layers,
+            )
+
+            if p.enable_hr:
+                req.enable_hr = True
+                req.hr_upscaler = p.hr_upscaler
+                req.hr_scale = p.hr_scale
+                req.hr_resize_x = p.hr_resize_x
+                req.hr_resize_y = p.hr_resize_y
 
             if 'CLIP_stop_at_last_layers' in p.override_settings:
-                req['clip_skip'] = p.override_settings['CLIP_stop_at_last_layers']
-
-            if 'sd_vae' in p._cloud_inference_settings:
-                req['sd_vae'] = p._cloud_inference_settings['sd_vae']
-
+                req.clip_skip = p.override_settings['CLIP_stop_at_last_layers']
+            if 'sd_vae' in p.override_settings:
+                req.sd_vae = p.override_settings['sd_vae']
             if len(controlnet_units) > 0:
-                req['controlnet_units'] = controlnet_units
+                req.controlnet_units = controlnet_units
 
-            headers = {
-                "accept": "application/json",
-                "content-type": "application/json",
-                'Accept-Encoding': 'gzip, deflate',
-                "X-OmniInfer-Source": _user_agent(p._cloud_inference_settings['sd_checkpoint']),
-                "X-OmniInfer-Key": self._token,
-                "User-Agent": _user_agent(p._cloud_inference_settings['sd_checkpoint'])
-            }
+            res = self._client.sync_txt2img(req, download_images=False, callback=self._update_state)
+            if res.data.status != ProgressResponseStatusCode.SUCCESSFUL:
+                raise Exception(res.data.failed_reason)
 
-            res = self._session.post("{}/v2/txt2img".format(OMNIINFER_API_ENDPOINT),
-                                     json=req,
-                                     headers=headers,
-                                     params={"key": self._token})
-            try:
-                json_data = res.json()
-            except Exception:
-                raise Exception("Request failed: {}".format(res.text))
-
-            if json_data['code'] != 0:
-                raise Exception("Request failed: {}".format(res.text))
-
-            return self._wait_task_completed(json_data['data']['task_id'])
+            return res.data.imgs
 
         imgs = []
         if len(controlnet_batchs) > 0:
@@ -413,6 +336,41 @@ class OmniinferAPI(BaseAPI):
 
         return retrieve_images(imgs)
 
+    def upscale(self, image,
+                resize_mode: int,
+                upscaling_resize: float,
+                upscaling_resize_w: int,
+                upscaling_resize_h: int,
+                upscaling_crop: bool,
+                extras_upscaler_1: str,
+                extras_upscaler_2: str,
+                extras_upscaler_2_visibility: float,
+                gfpgan_visibility: float,
+                codeformer_visibility: float,
+                codeformer_weight: float,
+                *args,
+                **kwargs
+                ):
+        req = UpscaleRequest(
+            image=image_to_base64(image),
+            upscaler_1=extras_upscaler_1,
+            resize_mode=resize_mode,
+            upscaling_resize=upscaling_resize,
+            upscaling_resize_w=upscaling_resize_w,
+            upscaling_resize_h=upscaling_resize_h,
+            upscaling_crop=upscaling_crop,
+            upscaler_2=extras_upscaler_2,
+            extras_upscaler_2_visibility=extras_upscaler_2_visibility,
+            gfpgan_visibility=gfpgan_visibility,
+            codeformer_visibility=codeformer_visibility,
+            codeformer_weight=codeformer_weight
+        )
+
+        res = self._client.sync_upscale(req, download_images=False, callback=self._update_state)
+        if res.data.status != ProgressResponseStatusCode.SUCCESSFUL:
+            raise Exception(res.data.failed_reason)
+        return retrieve_images(res.data.imgs)
+
     def list_models(self):
         if self._models is None or len(self._models) == 0:
             self._models = self.refresh_models()
@@ -420,29 +378,14 @@ class OmniinferAPI(BaseAPI):
 
     def refresh_models(self):
 
-        def get_models(kind):
-            url = "{}/v2/models".format(OMNIINFER_API_ENDPOINT)
-            headers = {
-                "accept": "application/json",
-                'Accept-Encoding': 'gzip, deflate',
-                "X-OmniInfer-Source": _user_agent(),
-                "User-Agent": _user_agent()
-            }
-
-            res = requests.get(url, headers=headers, params={"type": kind})
-            if res.status_code >= 400:
-                return []
-
-            models = []
-            if res.json()["data"]["models"] is not None:
-                models = res.json()["data"]["models"]
-
+        def get_models(type_):
+            ret = []
+            models = self._client.models().filter_by_type(type_)
             for item in models:
-                model = StableDiffusionModel(kind=item["type"],
-                                             name=item["sd_name"])
-                model.rating = item.get("civitai_download_count", 0)
-                civitai_tags = item["civitai_tags"].split(",") if item.get(
-                    "civitai_tags", None) is not None else []
+                model = StableDiffusionModel(kind=item.type.value,
+                                             name=item.sd_name)
+                model.rating = item.civitai_download_count
+                civitai_tags = item.civitai_tags.split(",") if item.civitai_tags is not None else []
 
                 if model.tags is None:
                     model.tags = []
@@ -450,53 +393,36 @@ class OmniinferAPI(BaseAPI):
                 if len(civitai_tags) > 0:
                     model.tags.append(civitai_tags[0])
 
-                if item.get('civitai_nsfw', False):
+                if item.civitai_nsfw:
                     model.tags.append("nsfw")
 
-                if len(item.get('civitai_images',
-                                [])) > 0 and item['civitai_images'][0]['meta'].get(
-                                    'prompt') is not None:
-                    first_image = item['civitai_images'][0]
-                    first_image_meta = item['civitai_images'][0]['meta']
-                    model.example = StableDiffusionModelExample(
-                        prompts=first_image_meta['prompt'],
-                        neg_prompt=first_image_meta.get(
-                            'negative_prompt', None),
-                        width=first_image_meta.get('width', None),
-                        height=first_image_meta.get('height', None),
-                        sampler_name=first_image_meta.get(
-                            'sampler_name', None),
-                        cfg_scale=first_image_meta.get('cfg_scale', None),
-                        seed=first_image_meta.get('seed', None),
-                        preview=first_image.get('url', None)
-                    )
+                model.examples = []
+                if item.civitai_images:
+                    for img in item.civitai_images:
+                        if img.meta.prompt:
+                            model.examples.append(StableDiffusionModelExample(
+                                prompts=img.meta.prompt,
+                                neg_prompt=img.meta.negative_prompt,
+                                width=img.meta.width,
+                                height=img.meta.height,
+                                sampler_name=img.meta.sampler_name,
+                                cfg_scale=img.meta.cfg_scale,
+                            ))
 
-                if item['type'] == 'lora':
-                    civitai_dependency_model_name = item.get(
-                        'civitai_dependency_model_name', None)
-                    if civitai_dependency_model_name is not None:
-                        model.dependency_model_name = civitai_dependency_model_name
-                sd_models.append(model)
+                ret.append(model)
+            return ret
 
-        m = {}
         sd_models = []
         print("[cloud-inference] refreshing models...")
 
-        get_models("checkpoint")
-        get_models("lora")
-        get_models("controlnet")
-        get_models("vae")
+        sd_models.extend(get_models(ModelType.CHECKPOINT))
+        sd_models.extend(get_models(ModelType.LORA))
+        sd_models.extend(get_models(ModelType.CONTROLNET))
+        sd_models.extend(get_models(ModelType.VAE))
+        sd_models.extend(get_models(ModelType.UPSCALER))
 
         # build lora and checkpoint relationship
-        for model in sd_models:
-            m[model.name] = model
 
-        for _, model in m.items():
-            if model.dependency_model_name is not None:
-                if m.get(model.dependency_model_name) is not None:
-                    m[model.dependency_model_name].append_child(model.name)
-
-        self.__class__.update_models_to_config(sd_models)
         self._models = sd_models
         return sd_models
 
@@ -531,7 +457,7 @@ def get_controlnet_arg(p: processing.StableDiffusionProcessing):
     for c in controlnet_units:
         if c.enabled == False:
             continue
-
+        
         controlnet_arg = {}
         controlnet_arg['weight'] = c.weight
         controlnet_arg['model'] = c.model
@@ -565,6 +491,19 @@ def get_controlnet_arg(p: processing.StableDiffusionProcessing):
         else:
             return
 
+        img2img = isinstance(p, processing.StableDiffusionProcessingImg2Img)
+        if img2img and not c.image:
+            c.image = {}
+            init_image = getattr(p, "init_images", [None])[0]
+            if init_image is not None:
+                c.image['image'] = np.asarray(init_image)
+
+            a1111_i2i_resize_mode = getattr(p, "resize_mode", None)
+            # TODO: mask
+
+            if a1111_i2i_resize_mode is not None:
+                controlnet_arg['resize_mode'] = a1111_i2i_resize_mode
+
         if getattr(c.input_mode, 'value', '') == "simple":
             if c.image:
                 if "mask" in c.image:
@@ -597,6 +536,25 @@ def get_controlnet_arg(p: processing.StableDiffusionProcessing):
             print("input_mode is empty")
 
     return controlnet_batchs
+
+
+def image_has_mask(input_image: np.ndarray) -> bool:
+    return (
+        input_image.ndim == 3 and
+        input_image.shape[2] == 4 and
+        np.max(input_image[:, :, 3]) > 127
+    )
+
+
+def prepare_mask(
+    mask: Image.Image, p: processing.StableDiffusionProcessing
+) -> Image.Image:
+    mask = mask.convert("L")
+    if getattr(p, "inpainting_mask_invert", False):
+        mask = ImageOps.invert(mask)
+    if getattr(p, "mask_blur", 0) > 0:
+        mask = mask.filter(ImageFilter.GaussianBlur(p.mask_blur))
+    return mask
 
 
 def retrieve_images(img_urls):

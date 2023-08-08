@@ -3,9 +3,9 @@ import base64
 import os
 
 
-def image_to_base64(image):
+def image_to_base64(image, format="PNG"):
     buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
+    image.save(buffer, format=format)
     buffer_bytes = buffer.getvalue()
 
     base64_str = base64.b64encode(buffer_bytes).decode("utf-8")

@@ -1,11 +1,11 @@
 import modules.scripts as scripts
 import gradio as gr
+import os
 
-from modules import script_callbacks, shared
+from modules import script_callbacks, shared, paths_internal
 from extension import api
 
 import random
-import os
 
 
 refresh_symbol = '\U0001f504'  # 🔄
@@ -55,57 +55,72 @@ class DataBinding:
         self.remote_inference_enabled = False
 
         self.remote_models = None
+        self.remote_models_aliases = {}
         self.remote_model_checkpoints = None
         self.remote_model_loras = None
         self.remote_model_controlnet = None
         self.remote_model_vaes = None
+        self.remote_model_upscalers = None
 
         # third component
-        self.txt2img_controlnet_model_dropdown = None
-        self.img2img_controlnet_model_dropdown = None
+        self.txt2img_controlnet_model_dropdown_units = []
+        self.img2img_controlnet_model_dropdown_units = []
+
+        # upscale
+        self.extras_upscaler_1 = None
+        self.extras_upscaler_2 = None
+        self.txt2img_hr_upscaler = None
+
+        # backup config
+        self.txt2img_hr_upscaler_original = None
+        self.extras_upscaler_1_original = None
+        self.extras_upscaler_2_original = None
+        self.txt2img_controlnet_model_dropdown_original_units = []
+        self.img2img_controlnet_model_dropdown_original_units = []
 
         self.default_remote_model = None
         self.initialized = False
 
+        self.ext_controlnet_installed = False
+
     def on_selected_model(self, name_index: int, selected_loras: list[str], suggest_prompts_enabled, prompt: str, neg_prompt: str):
-        selected: api.StableDiffusionModel = self.find_model_by_display_name(name_index)
+        selected: api.StableDiffusionModel = self.find_model_by_alias(name_index)
         selected_checkpoint = selected
 
         # name = self.remote_sd_models[name_index].name
         prompt = prompt
         neg_prompt = neg_prompt
 
-        if selected.example is not None:
-            if selected.example.prompts is not None and suggest_prompts_enabled:
-                prompt = selected.example.prompts
+        if len(selected.examples) > 0:
+            example = random.choice(selected.examples)
+            if suggest_prompts_enabled and example.prompts:
+                prompt = example.prompts
                 prompt = prompt.replace("\n", "")
                 if len(selected_loras) > 0:
-                    prompt = self._update_lora_in_prompt(
-                        selected.example.prompts, selected_loras)
-
-            if selected.example.neg_prompt is not None and suggest_prompts_enabled:
-                neg_prompt = selected.example.neg_prompt
+                    prompt = self._update_lora_in_prompt(selected.examples.prompts, selected_loras)
+            if suggest_prompts_enabled and example.neg_prompt:
+                neg_prompt = example.neg_prompt
+                neg_prompt = neg_prompt.replace("\n", "")
 
         return gr.Dropdown.update(
-            choices=[_.display_name for _ in self.remote_model_checkpoints],
-            value=selected_checkpoint.display_name), gr.update(value=selected_loras), gr.update(value=prompt), gr.update(value=neg_prompt)
+            choices=[_.alias for _ in self.remote_model_checkpoints],
+            value=selected_checkpoint.alias), gr.update(value=selected_loras), gr.update(value=prompt), gr.update(value=neg_prompt)
 
     def update_models(self):
-        _binding.remote_model_loras = _get_kind_from_remote_models(
-            _binding.remote_models, "lora")
-        _binding.remote_model_checkpoints = _get_kind_from_remote_models(
-            _binding.remote_models, "checkpoint")
-        _binding.remote_model_vaes = _get_kind_from_remote_models(
-            _binding.remote_models, "vae")
-        _binding.remote_model_controlnet = _get_kind_from_remote_models(
-            _binding.remote_models, "controlnet")
+        for model in self.remote_models:
+            self.remote_models_aliases[model.alias] = model
+
+        _binding.remote_model_loras = _get_kind_from_remote_models(_binding.remote_models, "lora")
+        _binding.remote_model_checkpoints = _get_kind_from_remote_models(_binding.remote_models, "checkpoint")
+        _binding.remote_model_vaes = _get_kind_from_remote_models(_binding.remote_models, "vae")
+        _binding.remote_model_controlnet = _get_kind_from_remote_models(_binding.remote_models, "controlnet")
+        _binding.remote_model_upscalers = _get_kind_from_remote_models(_binding.remote_models, "upscaler")
 
     @staticmethod
     def _update_lora_in_prompt(prompt, _lora_names, weight=1):
         lora_names = []
         for lora_name in _lora_names:
-            lora_names.append(
-                _binding.find_model_by_display_name(lora_name).name)
+            lora_names.append(_binding.find_model_by_alias(lora_name).name)
 
         prompt = prompt
         add_lora_prompts = []
@@ -134,10 +149,15 @@ class DataBinding:
     def update_cloud_api(self, v):
         self.cloud_api = v
 
-    def find_model_by_display_name(self, choice):  # display_name -> sd_name
+    def find_model_by_alias(self, choice):  # alias -> sd_name
         for model in self.remote_models:
-            if model.display_name == choice:
+            if model.alias == choice:
                 return model
+
+    def find_name_by_alias(self, choice):
+        for model in self.remote_models:
+            if model.alias == choice:
+                return model.name
 
 
 def _get_kind_from_remote_models(models, kind):
@@ -168,13 +188,13 @@ class CloudInferenceScript(scripts.Script):
 
         top_n = min(len(_binding.remote_model_checkpoints), 50)
         if _binding.default_remote_model is None:
-            _binding.default_remote_model = random.choice(
-                _binding.remote_model_checkpoints[:top_n]).display_name if len(_binding.remote_model_checkpoints) > 0 else None
+            _binding.default_remote_model = random.choice(_binding.remote_model_checkpoints[:top_n]).alias if len(_binding.remote_model_checkpoints) > 0 else None
 
-        default_enabled = shared.opts.data.get(
-            "cloud_inference_default_enabled", False)
+        default_enabled = shared.opts.data.get("cloud_inference_default_enabled", False)
         if default_enabled:
             _binding.remote_inference_enabled = True
+
+        default_suggest_prompts_enabled = shared.opts.data.get("cloud_inference_suggest_prompts_default_enabled", True)
 
         # define ui layouts
         with gr.Accordion('Cloud Inference', open=True):
@@ -187,7 +207,7 @@ class CloudInferenceScript(scripts.Script):
                     elem_id="{}_cloud_inference_checkbox".format(tabname))
 
                 cloud_inference_suggest_prompts_checkbox = gr.Checkbox(
-                    value=True,
+                    value=lambda: default_suggest_prompts_enabled,
                     label="Suggest Prompts",
                     elem_id="{}_cloud_inference_suggest_prompts_checkbox".format(tabname))
 
@@ -202,7 +222,7 @@ class CloudInferenceScript(scripts.Script):
                 cloud_inference_model_dropdown = gr.Dropdown(
                     label="Checkpoint",
                     choices=[
-                        _.display_name for _ in _binding.remote_model_checkpoints],
+                        _.alias for _ in _binding.remote_model_checkpoints],
                     value=lambda: _binding.default_remote_model,
                     elem_id="{}_cloud_inference_model_dropdown".format(tabname))
 
@@ -213,7 +233,7 @@ class CloudInferenceScript(scripts.Script):
 
             with gr.Row():
                 cloud_inference_lora_dropdown = gr.Dropdown(
-                    choices=[_.display_name for _ in _binding.remote_model_loras],
+                    choices=[_.alias for _ in _binding.remote_model_loras],
                     label="Lora",
                     elem_id="{}_cloud_inference_lora_dropdown", multiselect=True, scale=4)
 
@@ -226,8 +246,7 @@ class CloudInferenceScript(scripts.Script):
 
             with gr.Row(visible=False) as extra_row:
                 cloud_inference_vae_dropdown = gr.Dropdown(
-                    choices=["Automatic", "None"] + [
-                        _.name for _ in _binding.remote_model_vaes],
+                    choices=["Automatic", "None"] + [_.name for _ in _binding.remote_model_vaes],
                     value="Automatic",
                     label="VAE",
                     elme_id="{}_cloud_inference_vae_dropdown".format(tabname),
@@ -271,7 +290,7 @@ class CloudInferenceScript(scripts.Script):
                 _binding.remote_models = api.get_instance().list_models()
                 _binding.update_models()
 
-                return gr.update(choices=[_.display_name for _ in _binding.remote_model_checkpoints]), gr.update(choices=[_.display_name for _ in _binding.remote_model_loras]), gr.update(choices=["Automatic", "None"] + [_.name for _ in _binding.remote_model_vaes])
+                return gr.update(choices=[_.alias for _ in _binding.remote_model_checkpoints]), gr.update(choices=[_.alias for _ in _binding.remote_model_loras]), gr.update(choices=["Automatic", "None"] + [_.name for _ in _binding.remote_model_vaes])
 
             refresh_button.click(
                 fn=_model_refresh,
@@ -284,12 +303,22 @@ class CloudInferenceScript(scripts.Script):
         return [cloud_inference_checkbox, cloud_inference_model_dropdown, cloud_inference_vae_dropdown]
 
 
+# TODO: refactor this
 _binding = None
 if _binding is None:
     _binding = DataBinding()
+    if shared.opts.data.get("cloud_inference_default_enabled", False):
+        _binding.remote_inference_enabled = True
+
+    if os.path.isdir(os.path.join(paths_internal.extensions_dir, "sd-webui-controlnet")) and 'sd-webui-controlnet' not in shared.opts.data.get('disabled_extensions', []):
+        _binding.ext_controlnet_installed = True
+
     from scripts.hijack import _hijack_manager
     _hijack_manager._binding = _binding
-    _hijack_manager._apply_xyz()  # TOOD
+    _hijack_manager.hijack_onload()
+
+    _binding.remote_models = api.get_instance().list_models()
+    _binding.update_models()
 
 
 print('Loading extension: sd-webui-cloud-inference')
@@ -325,10 +354,46 @@ def on_after_component_callback(component, **_kwargs):
     if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) == 'img2img_cloud_inference_model_dropdown':
         _binding.img2img_cloud_inference_model_dropdown = component
 
-    if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) == 'txt2img_controlnet_ControlNet-0_controlnet_model_dropdown':
-        _binding.txt2img_controlnet_model_dropdown = component
-    if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) == 'img2img_controlnet_ControlNet-0_controlnet_model_dropdown':
-        _binding.img2img_controlnet_model_dropdown = component
+    # example: txt2img_controlnet_ControlNet_controlnet_model_dropdown and img2img_controlnet_ControlNet-0_controlnet_model_dropdown
+    if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) != None and component.elem_id.startswith('txt2img_controlnet_ControlNet') and component.elem_id.endswith('_model_dropdown'):
+        _binding.txt2img_controlnet_model_dropdown_units.append(component)
+        _binding.txt2img_controlnet_model_dropdown_original_units.append(component.get_config())
+
+        if _binding.remote_inference_enabled:
+            component.choices = ['None'] + [_.alias for _ in _binding.remote_model_controlnet]
+            component.value = component.choices[0]
+
+    if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) != None and component.elem_id.startswith('img2img_controlnet_ControlNet') and component.elem_id.endswith('_model_dropdown'):
+        _binding.img2img_controlnet_model_dropdown_units.append(component)
+        _binding.img2img_controlnet_model_dropdown_original_units.append(component.get_config())
+
+        if _binding.remote_inference_enabled:
+            component.choices = ['None'] + [_.alias for _ in _binding.remote_model_controlnet]
+            component.value = component.choices[0]
+
+    if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) == 'extras_upscaler_1':
+        _binding.extras_upscaler_1 = component
+        _binding.extras_upscaler_1_original = component.get_config()
+
+        if _binding.remote_inference_enabled:
+            component.choices = [_.alias for _ in _binding.remote_model_upscalers]
+            component.value = component.choices[0]
+
+    if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) == 'extras_upscaler_2':
+        _binding.extras_upscaler_2 = component
+        _binding.extras_upscaler_2_original = component.get_config()
+
+        if _binding.remote_inference_enabled:
+            component.choices = ['None'] + [_.alias for _ in _binding.remote_model_upscalers]
+            component.value = component.choices[0]
+
+    if type(component) is gr.Dropdown and getattr(component, 'elem_id', None) == 'txt2img_hr_upscaler':
+        _binding.txt2img_hr_upscaler = component
+        _binding.txt2img_hr_upscaler_original = component.get_config()
+
+        if _binding.remote_inference_enabled:
+            component.choices = [_.alias for _ in _binding.remote_model_upscalers]
+            component.value = component.choices[0]
 
     if _binding.txt2img_cloud_inference_checkbox and \
             _binding.img2img_cloud_inference_checkbox and \
@@ -338,9 +403,15 @@ def on_after_component_callback(component, **_kwargs):
             _binding.img2img_cloud_inference_suggest_prompts_checkbox and \
             _binding.txt2img_generate and \
             _binding.img2img_generate and \
-            _binding.txt2img_controlnet_model_dropdown and \
-            _binding.img2img_controlnet_model_dropdown and \
+            _binding.extras_upscaler_1 and \
+            _binding.extras_upscaler_2 and \
+            _binding.txt2img_hr_upscaler and \
             not _binding.initialized:
+
+        if _binding.ext_controlnet_installed:
+            expect_unit_amount = shared.opts.data.get("control_net_max_models_num", 1)
+            if expect_unit_amount != len(_binding.txt2img_controlnet_model_dropdown_units):
+                return
 
         sync_cloud_model(_binding.txt2img_cloud_inference_model_dropdown,
                          _binding.img2img_cloud_inference_model_dropdown)
@@ -348,8 +419,26 @@ def on_after_component_callback(component, **_kwargs):
         sync_two_component(_binding.txt2img_cloud_inference_suggest_prompts_checkbox,
                            _binding.img2img_cloud_inference_suggest_prompts_checkbox, 'change')
 
-        sync_cloud_inference_checkbox(_binding.txt2img_cloud_inference_checkbox,
-                                      _binding.img2img_cloud_inference_checkbox, _binding.txt2img_generate, _binding.img2img_generate, _binding.txt2img_controlnet_model_dropdown, _binding.img2img_controlnet_model_dropdown)
+        if not _binding.ext_controlnet_installed:
+            on_cloud_inference_checkbox_change_without_controlnet(_binding.txt2img_cloud_inference_checkbox,
+                                                                  _binding.img2img_cloud_inference_checkbox,
+                                                                  _binding.txt2img_generate,
+                                                                  _binding.img2img_generate,
+                                                                  _binding.extras_upscaler_1,
+                                                                  _binding.extras_upscaler_2,
+                                                                  _binding.txt2img_hr_upscaler
+                                                                  )
+        else:
+            on_cloud_inference_checkbox_change(_binding.txt2img_cloud_inference_checkbox,
+                                               _binding.img2img_cloud_inference_checkbox,
+                                               _binding.txt2img_generate,
+                                               _binding.img2img_generate,
+                                               _binding.txt2img_controlnet_model_dropdown_units,
+                                               _binding.img2img_controlnet_model_dropdown_units,
+                                               _binding.extras_upscaler_1,
+                                               _binding.extras_upscaler_2,
+                                               _binding.txt2img_hr_upscaler
+                                               )
 
         _binding.initialized = True
 
@@ -372,7 +461,14 @@ def sync_cloud_model(a, b):
     getattr(b, "select")(fn=mirror, inputs=[b, a], outputs=[b, a])
 
 
-def sync_cloud_inference_checkbox(txt2img_checkbox, img2img_checkbox, txt2img_generate_button, img2img_generate_button, txt2img_controlnet_model_dropdown, img2img_controlnet_model_dropdown):
+def on_cloud_inference_checkbox_change_without_controlnet(txt2img_checkbox,
+                                                          img2img_checkbox,
+                                                          txt2img_generate_button,
+                                                          img2img_generate_button,
+                                                          extras_upscaler_1,
+                                                          extras_upscaler_2,
+                                                          txt2img_hr_upscaler
+                                                          ):
     def mirror(source, target):
         enabled = source
 
@@ -386,18 +482,140 @@ def sync_cloud_inference_checkbox(txt2img_checkbox, img2img_checkbox, txt2img_ge
         else:
             _binding.remote_inference_enabled = False
 
-        controlnet_models = ["None"] + \
-            [_.name for _ in _binding.remote_model_controlnet]
+        upscale_models_with_none = ["None"] + [_.alias for _ in _binding.remote_model_upscalers]
+        upscale_models = [_.alias for _ in _binding.remote_model_upscalers]
 
         if not enabled:
-            return source, target, button_text, button_text, None, None
+            allow_update_fields = ['value', 'choices']
+            extras_upscaler_1_config = {k: v for k, v in _binding.extras_upscaler_1_original.items() if k in allow_update_fields}
+            extras_upscaler_2_config = {k: v for k, v in _binding.extras_upscaler_2_original.items() if k in allow_update_fields}
+            txt2img_hr_upscaler_config = {k: v for k, v in _binding.txt2img_hr_upscaler_original.items() if k in allow_update_fields}
 
-        return source, target, button_text, button_text, gr.update(value=controlnet_models[0], choices=controlnet_models), gr.update(value=controlnet_models[0], choices=controlnet_models)
+            return source, \
+                target, \
+                button_text, \
+                button_text, \
+                gr.update(**extras_upscaler_1_config), \
+                gr.update(**extras_upscaler_2_config), \
+                gr.update(**txt2img_hr_upscaler_config)
 
-    txt2img_checkbox.change(fn=mirror, inputs=[txt2img_checkbox, img2img_checkbox], outputs=[
-                            txt2img_checkbox, img2img_checkbox, txt2img_generate_button, img2img_generate_button, txt2img_controlnet_model_dropdown, img2img_controlnet_model_dropdown])
-    img2img_checkbox.change(fn=mirror, inputs=[img2img_checkbox, txt2img_checkbox], outputs=[
-                            img2img_checkbox, txt2img_checkbox, txt2img_generate_button, img2img_generate_button, txt2img_controlnet_model_dropdown, img2img_controlnet_model_dropdown])
+        return source, \
+            target, \
+            button_text,\
+            button_text,\
+            gr.update(value=upscale_models[0], choices=upscale_models), \
+            gr.update(value=upscale_models_with_none[0], choices=upscale_models_with_none), \
+            gr.update(value=upscale_models[0], choices=upscale_models) \
+
+    txt2img_checkbox.change(fn=mirror,
+                            inputs=[txt2img_checkbox,
+                                    img2img_checkbox],
+                            outputs=[
+                                txt2img_checkbox,
+                                img2img_checkbox,
+                                txt2img_generate_button,
+                                img2img_generate_button,
+                                extras_upscaler_1,
+                                extras_upscaler_2,
+                                txt2img_hr_upscaler
+                            ])
+    img2img_checkbox.change(fn=mirror,
+                            inputs=[img2img_checkbox,
+                                    txt2img_checkbox
+                                    ],
+                            outputs=[
+                                img2img_checkbox,
+                                txt2img_checkbox,
+                                txt2img_generate_button,
+                                img2img_generate_button,
+                                extras_upscaler_1,
+                                extras_upscaler_2,
+                                txt2img_hr_upscaler
+                            ])
+
+
+def on_cloud_inference_checkbox_change(txt2img_checkbox,
+                                       img2img_checkbox,
+                                       txt2img_generate_button,
+                                       img2img_generate_button,
+                                       txt2img_controlnet_model_dropdown_units,
+                                       img2img_controlnet_model_dropdown_units,
+                                       extras_upscaler_1,
+                                       extras_upscaler_2,
+                                       txt2img_hr_upscaler
+                                       ):
+    def mirror(source, target):
+        enabled = source
+
+        if source != target:
+            target = source
+
+        button_text = "Generate"
+        if enabled:
+            _binding.remote_inference_enabled = True
+            button_text = "Generate (cloud)"
+        else:
+            _binding.remote_inference_enabled = False
+
+        controlnet_models = ["None"] + [_.name for _ in _binding.remote_model_controlnet]
+        upscale_models_with_none = ["None"] + [_.alias for _ in _binding.remote_model_upscalers]
+        upscale_models = [_.alias for _ in _binding.remote_model_upscalers]
+
+        if not enabled:
+            allow_update_fields = ['value', 'choices']
+            extras_upscaler_1_config = {k: v for k, v in _binding.extras_upscaler_1_original.items() if k in allow_update_fields}
+            extras_upscaler_2_config = {k: v for k, v in _binding.extras_upscaler_2_original.items() if k in allow_update_fields}
+            txt2img_hr_upscaler_config = {k: v for k, v in _binding.txt2img_hr_upscaler_original.items() if k in allow_update_fields}
+
+            return source, \
+                target, \
+                button_text, \
+                button_text, \
+                *[gr.update(**{k: v for k, v in _.items() if k in allow_update_fields}) for _ in _binding.txt2img_controlnet_model_dropdown_original_units], \
+                *[gr.update(**{k: v for k, v in _.items() if k in allow_update_fields}) for _ in _binding.img2img_controlnet_model_dropdown_original_units], \
+                gr.update(**extras_upscaler_1_config), \
+                gr.update(**extras_upscaler_2_config), \
+                gr.update(**txt2img_hr_upscaler_config)
+
+        return source, \
+            target, \
+            button_text,\
+            button_text,\
+            *[gr.update(value=controlnet_models[0], choices=controlnet_models) for _ in txt2img_controlnet_model_dropdown_units], \
+            *[gr.update(value=controlnet_models[0], choices=controlnet_models) for _ in img2img_controlnet_model_dropdown_units], \
+            gr.update(value=upscale_models[0], choices=upscale_models), \
+            gr.update(value=upscale_models_with_none[0], choices=upscale_models_with_none), \
+            gr.update(value=upscale_models[0], choices=upscale_models) \
+
+    txt2img_checkbox.change(fn=mirror,
+                            inputs=[txt2img_checkbox,
+                                    img2img_checkbox],
+                            outputs=[
+                                txt2img_checkbox,
+                                img2img_checkbox,
+                                txt2img_generate_button,
+                                img2img_generate_button,
+                                *txt2img_controlnet_model_dropdown_units,
+                                *img2img_controlnet_model_dropdown_units,
+                                extras_upscaler_1,
+                                extras_upscaler_2,
+                                txt2img_hr_upscaler
+                            ])
+    img2img_checkbox.change(fn=mirror,
+                            inputs=[img2img_checkbox,
+                                    txt2img_checkbox
+                                    ],
+                            outputs=[
+                                img2img_checkbox,
+                                txt2img_checkbox,
+                                txt2img_generate_button,
+                                img2img_generate_button,
+                                *txt2img_controlnet_model_dropdown_units,
+                                *img2img_controlnet_model_dropdown_units,
+                                extras_upscaler_1,
+                                extras_upscaler_2,
+                                txt2img_hr_upscaler
+                            ])
 
 
 def on_ui_settings():
@@ -406,8 +624,10 @@ def on_ui_settings():
         False, "Cloud Inference Default Enabled", component=gr.Checkbox, section=section))
     shared.opts.add_option("cloud_inference_checkbox_hidden", shared.OptionInfo(
         False, "Cloud Inference Checkbox Hideen", component=gr.Checkbox, section=section))
+    shared.opts.add_option("cloud_inference_suggest_prompts_default_enabled", shared.OptionInfo(
+        True, "Cloud Inference Suggest Prompts Default Enabled", component=gr.Checkbox, section=section))
 
 
 script_callbacks.on_after_component(on_after_component_callback)
 script_callbacks.on_ui_settings(on_ui_settings)
-script_callbacks.on_app_started(_hijack_manager.hijack_all)
+script_callbacks.on_app_started(_hijack_manager.hijack_on_app_started)
