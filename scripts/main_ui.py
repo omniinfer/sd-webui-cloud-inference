@@ -97,7 +97,7 @@ class DataBinding:
                 prompt = example.prompts
                 prompt = prompt.replace("\n", "")
                 if len(selected_loras) > 0:
-                    prompt = self._update_lora_in_prompt(selected.examples.prompts, selected_loras)
+                    prompt = self._update_lora_in_prompt(prompt, selected_loras)
             if suggest_prompts_enabled and example.neg_prompt:
                 neg_prompt = example.neg_prompt
                 neg_prompt = neg_prompt.replace("\n", "")
