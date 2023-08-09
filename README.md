@@ -95,3 +95,12 @@ or you can use the VAE feature with X/Y/Z
 
 ## 9. Advanced - ControlNet
 ![image-mh (2)](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/cd7ed643-831c-4999-94a1-9f9668e080cc)![Screenshot 2023-07-25 at 22 23 01-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/db74e466-5e7f-421f-b33c-09802f5ee2c5)
+
+# 9. Advanced - ControlNet
+![image-mh (2)](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/cd7ed643-831c-4999-94a1-9f9668e080cc)![Screenshot 2023-07-25 at 22 23 01-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/db74e466-5e7f-421f-b33c-09802f5ee2c5)
+
+## 10. Advanced - Upscale and Hires.Fix
+![Screenshot 2023-08-09 at 20 13 58-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/15ac40f5-ad4b-4cc7-9927-4cc82a90f853)
+
+![Screenshot 2023-08-09 at 20 16 18-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/1e606dd5-51aa-4eea-baba-f78849104591)
+
