@@ -19,17 +19,19 @@ This extension enables faster image generation without the need for expensive GP
 
 ## Compatibility and Limitations
 
-| Feature                    | Compatibility | Limitations |
-| -------------------------- | ------------- | ----------- |
-| txt2img                    | ✅✅✅           | 🚫 Hires.fix |
-| txt2img_controlnet         | ✅✅✅✅✅         | 🚫 Hires.fix |
-| img2img                    | ✅✅✅           | 🚫 Tiling    |
-| img2img_inpaint            | ✅✅✅           |             |
-| img2img_controlnet         | ✅✅✅✅✅         | 🚫 Hires.fix |
-| vae model                  | ✅✅✅✅✅         |             |
-| scripts - X/Y/Z plot       | ✅✅✅✅✅         |             |
-| scripts - Prompt matrix    | ✅✅✅✅✅         |             |
-| scripts - Prompt from file | ✅✅✅✅✅         |             |
+| Feature                    | Support | Limitations |
+| -------------------------- | ------- | ----------- |
+| txt2img                    | ✅       |             |
+| txt2img_hires.fix          | ✅       |             |
+| txt2img_controlnet         | ✅       |             |
+| img2img                    | ✅       |             |
+| img2img_inpaint            | ✅       |             |
+| img2img_controlnet         | ✅       |             |
+| extras upscale             | ✅       |             |
+| vae model                  | ✅       |             |
+| scripts - X/Y/Z plot       | ✅       |             |
+| scripts - Prompt matrix    | ✅       |             |
+| scripts - Prompt from file | ✅       |             |
 
 
 
