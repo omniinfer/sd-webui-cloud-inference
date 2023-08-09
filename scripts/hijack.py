@@ -267,7 +267,7 @@ class _HijackManager(object):
         if not self._binding.remote_inference_enabled:
             return self.hijack_map['modules.postprocessing.run_postprocessing']['old'](*args, **kwargs)
 
-        shared.state.begin(job="extras")
+        shared.state.begin()
         shared.state.textinfo = "remote inferencing ({})".format(api.get_instance().__class__.__name__)
 
         image_data = []
