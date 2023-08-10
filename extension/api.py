@@ -267,8 +267,10 @@ class OmniinferAPI(BaseAPI, UpscaleAPI):
             )
             if 'CLIP_stop_at_last_layers' in p.override_settings:
                 req.clip_skip = p.override_settings['CLIP_stop_at_last_layers']
-            if 'sd_vae' in p.override_settings:
-                req.model_name = p.override_settings['sd_vae']
+
+            if 'sd_vae' in p._cloud_inference_settings:
+                req.sd_vae = p._cloud_inference_settings['sd_vae']
+
             if len(controlnet_units) > 0:
                 req.controlnet_units = controlnet_units
 
@@ -314,8 +316,9 @@ class OmniinferAPI(BaseAPI, UpscaleAPI):
 
             if 'CLIP_stop_at_last_layers' in p.override_settings:
                 req.clip_skip = p.override_settings['CLIP_stop_at_last_layers']
-            if 'sd_vae' in p.override_settings:
-                req.sd_vae = p.override_settings['sd_vae']
+            if 'sd_vae' in p._cloud_inference_settings:
+                req.sd_vae = p._cloud_inference_settings['sd_vae']
+
             if len(controlnet_units) > 0:
                 req.controlnet_units = controlnet_units
 
@@ -457,7 +460,7 @@ def get_controlnet_arg(p: processing.StableDiffusionProcessing):
     for c in controlnet_units:
         if c.enabled == False:
             continue
-        
+
         controlnet_arg = {}
         controlnet_arg['weight'] = c.weight
         controlnet_arg['model'] = c.model
