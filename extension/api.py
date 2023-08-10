@@ -380,7 +380,7 @@ class OmniinferAPI(BaseAPI, UpscaleAPI):
 
         def get_models(type_):
             ret = []
-            models = self._client.models().filter_by_type(type_)
+            models = self._client.models(refresh=True).filter_by_type(type_)
             for item in models:
                 model = StableDiffusionModel(kind=item.type.value,
                                              name=item.sd_name)
