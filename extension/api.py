@@ -1,13 +1,15 @@
 import requests
-import time
 import io
 import base64
-from modules import sd_samplers, processing
+from modules import processing
 from modules.shared import opts, state
 from PIL import Image, ImageFilter, ImageOps
 from multiprocessing.pool import ThreadPool
+import importlib
 
 from omniinfer_client import *
+
+from typing import Dict
 
 import numpy as np
 
@@ -255,6 +257,7 @@ class OmniinferAPI(BaseAPI, UpscaleAPI):
                 inpaint_full_res=bool2int(p.inpaint_full_res),
                 inpaint_full_res_padding=p.inpaint_full_res_padding,
                 initial_noise_multiplier=p.initial_noise_multiplier,
+                inpainting_mask_invert=bool2int(p.inpainting_mask_invert),
                 prompt=p.prompt,
                 seed=int(p.seed) or -1,
                 negative_prompt=p.negative_prompt,
@@ -456,7 +459,15 @@ def get_visible_extension_args(p: processing.StableDiffusionProcessing, name):
 
 def get_controlnet_arg(p: processing.StableDiffusionProcessing):
     controlnet_batchs = []
-    controlnet_units = get_visible_extension_args(p, 'controlnet')
+
+    # controlnet_units = get_visible_extension_args(p, 'controlnet')
+    try:
+        external_code = importlib.import_module('extensions.sd-webui-controlnet.scripts.external_code', 'external_code')
+    except ModuleNotFoundError:
+        return []
+
+    controlnet_units = external_code.get_all_units_in_processing(p)
+
     for c in controlnet_units:
         if c.enabled == False:
             continue
@@ -508,13 +519,13 @@ def get_controlnet_arg(p: processing.StableDiffusionProcessing):
                 controlnet_arg['resize_mode'] = a1111_i2i_resize_mode
 
         if getattr(c.input_mode, 'value', '') == "simple":
-            if c.image:
+            if c.image is not None:
+                c.image = image_dict_from_any(c.image)
                 if "mask" in c.image:
                     mask = Image.fromarray(c.image["mask"])
                     controlnet_arg['mask'] = image_to_base64(mask)
 
-                controlnet_arg['input_image'] = image_to_base64(
-                    Image.fromarray(c.image["image"]))
+                controlnet_arg['input_image'] = image_to_base64(Image.fromarray(c.image["image"]))
 
                 if len(controlnet_batchs) == 0:
                     controlnet_batchs = [[]]
@@ -558,6 +569,44 @@ def prepare_mask(
     if getattr(p, "mask_blur", 0) > 0:
         mask = mask.filter(ImageFilter.GaussianBlur(p.mask_blur))
     return mask
+
+
+def image_dict_from_any(image) -> Optional[Dict[str, np.ndarray]]:
+    if image is None:
+        return None
+
+    if isinstance(image, (tuple, list)):
+        image = {'image': image[0], 'mask': image[1]}
+    elif not isinstance(image, dict):
+        image = {'image': image, 'mask': None}
+    else:  # type(image) is dict
+        # copy to enable modifying the dict and prevent response serialization error
+        image = dict(image)
+
+    if isinstance(image['image'], str):
+        if os.path.exists(image['image']):
+            image['image'] = np.array(Image.open(image['image'])).astype('uint8')
+        elif image['image']:
+            image['image'] = external_code.to_base64_nparray(image['image'])
+        else:
+            image['image'] = None
+
+    # If there is no image, return image with None image and None mask
+    if image['image'] is None:
+        image['mask'] = None
+        return image
+
+    if isinstance(image['mask'], str):
+        if os.path.exists(image['mask']):
+            image['mask'] = np.array(Image.open(image['mask'])).astype('uint8')
+        elif image['mask']:
+            image['mask'] = external_code.to_base64_nparray(image['mask'])
+        else:
+            image['mask'] = np.zeros_like(image['image'], dtype=np.uint8)
+    elif image['mask'] is None:
+        image['mask'] = np.zeros_like(image['image'], dtype=np.uint8)
+
+    return image
 
 
 def retrieve_images(img_urls):
