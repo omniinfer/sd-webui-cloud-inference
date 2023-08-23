@@ -255,6 +255,7 @@ class OmniinferAPI(BaseAPI, UpscaleAPI):
                 inpaint_full_res=bool2int(p.inpaint_full_res),
                 inpaint_full_res_padding=p.inpaint_full_res_padding,
                 initial_noise_multiplier=p.initial_noise_multiplier,
+                inpainting_mask_invert=bool2int(p.inpainting_mask_invert),
                 prompt=p.prompt,
                 seed=int(p.seed) or -1,
                 negative_prompt=p.negative_prompt,
