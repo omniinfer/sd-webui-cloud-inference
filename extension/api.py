@@ -574,7 +574,7 @@ def prepare_mask(
 def image_dict_from_any(image) -> Optional[Dict[str, np.ndarray]]:
     if image is None:
         return None
-
+    
     if isinstance(image, (tuple, list)):
         image = {'image': image[0], 'mask': image[1]}
     elif not isinstance(image, dict):
@@ -595,7 +595,10 @@ def image_dict_from_any(image) -> Optional[Dict[str, np.ndarray]]:
     if image['image'] is None:
         image['mask'] = None
         return image
-
+    
+    if 'mask' not in image:
+        image['mask'] = None
+    
     if isinstance(image['mask'], str):
         if os.path.exists(image['mask']):
             image['mask'] = np.array(Image.open(image['mask'])).astype('uint8')
