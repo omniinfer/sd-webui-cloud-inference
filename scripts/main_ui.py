@@ -2,20 +2,28 @@ import modules.scripts as scripts
 import gradio as gr
 import os
 
-from modules import script_callbacks, shared, paths_internal
+from modules import script_callbacks, shared, paths_internal, ui_common
 from extension import api
 
+from collections import Counter
 import random
 
 
 refresh_symbol = '\U0001f504'  # 🔄
 favorite_symbol = '\U0001f49e'  # 💞
+model_browser_symbol = '\U0001f50d'  # 🔍
 
 
 class FormComponent:
     def get_expected_parent(self):
         return gr.components.Form
 
+class FormButton(FormComponent, gr.Button):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def get_block_name(self):
+        return "button"
 
 class ToolButton(FormComponent, gr.Button):
     """Small button with single emoji as text, fits inside gradio forms"""
@@ -57,6 +65,7 @@ class DataBinding:
         self.remote_models = None
         self.remote_models_aliases = {}
         self.remote_model_checkpoints = None
+        self.remote_model_embeddings = None
         self.remote_model_loras = None
         self.remote_model_controlnet = None
         self.remote_model_vaes = None
@@ -83,7 +92,7 @@ class DataBinding:
 
         self.ext_controlnet_installed = False
 
-    def on_selected_model(self, name_index: int, selected_loras: list[str], suggest_prompts_enabled, prompt: str, neg_prompt: str):
+    def on_selected_model(self, name_index: int, selected_loras: list[str], selected_embedding: list[str], suggest_prompts_enabled, prompt: str, neg_prompt: str):
         selected: api.StableDiffusionModel = self.find_model_by_alias(name_index)
         selected_checkpoint = selected
 
@@ -101,16 +110,18 @@ class DataBinding:
             if suggest_prompts_enabled and example.neg_prompt:
                 neg_prompt = example.neg_prompt
                 neg_prompt = neg_prompt.replace("\n", "")
+                if len(selected_embedding) > 0:
+                    neg_prompt = self._update_embedding_in_neg_prompt(neg_prompt, selected_embedding)
 
         return gr.Dropdown.update(
-            choices=[_.alias for _ in self.remote_model_checkpoints],
-            value=selected_checkpoint.alias), gr.update(value=selected_loras), gr.update(value=prompt), gr.update(value=neg_prompt)
+            choices=[_.alias for _ in self.remote_model_checkpoints], value=selected_checkpoint.alias),  gr.update(value=prompt), gr.update(value=neg_prompt)
 
     def update_models(self):
         for model in self.remote_models:
             self.remote_models_aliases[model.alias] = model
 
         _binding.remote_model_loras = _get_kind_from_remote_models(_binding.remote_models, "lora")
+        _binding.remote_model_embeddings = _get_kind_from_remote_models(_binding.remote_models, "textualinversion")
         _binding.remote_model_checkpoints = _get_kind_from_remote_models(_binding.remote_models, "checkpoint")
         _binding.remote_model_vaes = _get_kind_from_remote_models(_binding.remote_models, "vae")
         _binding.remote_model_controlnet = _get_kind_from_remote_models(_binding.remote_models, "controlnet")
@@ -143,8 +154,36 @@ class DataBinding:
 
         return ", ".join(prompt_split)
 
+    @staticmethod
+    def _update_embedding_in_neg_prompt(neg_prompt, _embedding_names):
+        embedding_names = []
+        for embedding_name in _embedding_names:
+            name = _binding.find_model_by_alias(embedding_name).name.rsplit(".", 1)[0]  # remove extension
+            embedding_names.append(name)
+
+        neg_prompt = neg_prompt
+        add_embedding_prompts = []
+
+        neg_prompt_split = [_.strip() for _ in neg_prompt.split(',')]
+
+        # add
+        for embedding_name in embedding_names:
+            if embedding_name not in neg_prompt:
+                add_embedding_prompts.append(embedding_name)
+        # delete
+        for prompt_item in neg_prompt_split:
+            if embedding_name not in embedding_names:
+                neg_prompt_split.remove(prompt_item)
+
+        neg_prompt_split.extend(add_embedding_prompts)
+
+        return ", ".join(neg_prompt_split)
+
     def update_selected_lora(self, lora_names, prompt):
         return gr.update(value=self._update_lora_in_prompt(prompt, lora_names))
+
+    def update_selected_embedding(self, embedding_names, neg_prompt):
+        return gr.update(value=self._update_embedding_in_neg_prompt(neg_prompt, embedding_names))
 
     def update_cloud_api(self, v):
         self.cloud_api = v
@@ -158,6 +197,19 @@ class DataBinding:
         for model in self.remote_models:
             if model.alias == choice:
                 return model.name
+
+    # def update_model_favorite(self, alias):
+    #     model = self.find_model_by_alias(alias)
+    #     if model is not None:
+    #         if "favorite" in model.tags:
+    #             model.tags.remove("favorite")
+    #         else:
+    #             model.tags.append("favorite")
+    #         return gr.update(value=build_model_browser_html_for_checkpoint("txt2img", _binding.remote_model_checkpoints)), \
+    #             gr.update(value=build_model_browser_html_for_loras("txt2img", _binding.remote_model_loras)), \
+    #             gr.update(value=build_model_browser_html_for_embeddings("txt2img", _binding.remote_model_embeddings)), \
+        
+
 
 
 def _get_kind_from_remote_models(models, kind):
@@ -216,18 +268,21 @@ class CloudInferenceScript(scripts.Script):
                     label="Service Provider",
                     choices=["Omniinfer"],
                     value="Omniinfer",
-                    elem_id="{}_cloud_api_dropdown".format(tabname)
+                    elem_id="{}_cloud_api_dropdown".format(tabname),
+                    scale=1
                 )
 
                 cloud_inference_model_dropdown = gr.Dropdown(
                     label="Checkpoint",
-                    choices=[
-                        _.alias for _ in _binding.remote_model_checkpoints],
+                    choices=[_.alias for _ in _binding.remote_model_checkpoints],
                     value=lambda: _binding.default_remote_model,
-                    elem_id="{}_cloud_inference_model_dropdown".format(tabname))
+                    elem_id="{}_cloud_inference_model_dropdown".format(tabname), scale=2)
 
-                refresh_button = ToolButton(
-                    value=refresh_symbol, elem_id="{}_cloud_inference_refersh_button".format(tabname))
+
+                model_browser_button = FormButton(value="{} Browser".format(model_browser_symbol), elem_classes='model-browser-button', elem_id="{}_cloud_inference_browser_button".format(tabname), scale=0)
+                refresh_button = ToolButton(value=refresh_symbol, elem_id="{}_cloud_inference_refersh_button".format(tabname))
+
+                # model_browser_button = ToolButton(model_browser_symbol,  elem_id="{}_cloud_inference_browser_button".format(tabname))
                 # favorite_button = ToolButton(
                 #     value=favorite_symbol, elem_id="{}_cloud_inference_favorite_button".format(tabname))
 
@@ -236,6 +291,10 @@ class CloudInferenceScript(scripts.Script):
                     choices=[_.alias for _ in _binding.remote_model_loras],
                     label="Lora",
                     elem_id="{}_cloud_inference_lora_dropdown", multiselect=True, scale=4)
+                cloud_inference_embedding_dropdown = gr.Dropdown(
+                    choices=[_.alias for _ in _binding.remote_model_embeddings],
+                    label="Embedding",
+                    elem_id="{}_cloud_inference_embedding_dropdown", multiselect=True, scale=4)
 
                 cloud_inference_extra_checkbox = gr.Checkbox(
                     label="Extra",
@@ -243,6 +302,25 @@ class CloudInferenceScript(scripts.Script):
                     elem_id="{}_cloud_inference_extra_subseed_show",
                     scale=1
                 )
+
+                # functionally
+                hide_button_change_checkpoint = gr.Button('Change Cloud checkpoint', elem_id='{}_change_cloud_checkpoint'.format(tabname), visible=False)
+                hide_button_change_lora = gr.Button('Change Cloud LORA', elem_id='{}_change_cloud_lora'.format(tabname), visible=False)
+                hide_button_change_embedding = gr.Button('Change Cloud Embedding', elem_id='{}_change_cloud_embedding'.format(tabname), visible=False)
+                # hide_button_favorite = gr.Button('Favorite', elem_id='{}_favorite'.format(tabname), visible=False)
+
+            with gr.Box(elem_id='{}_model_browser'.format(tabname), elem_classes="popup-model-browser", visbile=False) as checkpoint_model_browser_dialog:
+                with gr.Tab(label="Checkpoint", elem_id='{}_model_browser_checkpoint_tab'.format(tabname)):
+                    model_checkpoint_browser_dialog_html = gr.HTML(build_model_browser_html_for_checkpoint(tabname, _binding.remote_model_checkpoints))
+                with gr.Tab(label="LORA", elem_id='{}_model_browser_lora_tab'.format(tabname)):
+                    model_lora_browser_dialog_html = gr.HTML(build_model_browser_html_for_loras(tabname, _binding.remote_model_loras))
+                with gr.Tab(label="Embedding", elem_id='{}_model_browser_embedding_tab'.format(tabname)):
+                    model_embedding_browser_dialog_html = gr.HTML(build_model_browser_html_for_embeddings(tabname, _binding.remote_model_embeddings))
+
+
+            checkpoint_model_browser_dialog.visible = False
+            model_browser_button.click(fn=lambda: gr.update(visible=True), inputs=[], outputs=[checkpoint_model_browser_dialog],).\
+                then(fn=None, _js="function(){ modelBrowserPopup('" + tabname + "', gradioApp().getElementById('" + checkpoint_model_browser_dialog.elem_id + "')); }", show_progress=True)
 
             with gr.Row(visible=False) as extra_row:
                 cloud_inference_vae_dropdown = gr.Dropdown(
@@ -255,25 +333,47 @@ class CloudInferenceScript(scripts.Script):
                 cloud_inference_extra_checkbox.change(lambda x: gr.update(visible=x), inputs=[
                                                       cloud_inference_extra_checkbox], outputs=[extra_row])
 
+            # lora
             # define events of components.
             # auto fill prompt after select model
-            cloud_inference_model_dropdown.select(
+            hide_button_change_checkpoint.click(
                 fn=_binding.on_selected_model,
+                _js="function(a, b, c, d, e, f){ var res = desiredCloudInferenceCheckpointName; desiredCloudInferenceCheckpointName = ''; return [res, b, c, d, e, f]; }",
                 inputs=[
                     cloud_inference_model_dropdown,
                     cloud_inference_lora_dropdown,
+                    cloud_inference_embedding_dropdown,
                     cloud_inference_suggest_prompts_checkbox,
                     getattr(_binding, "{}_prompt".format(tabname)),
                     getattr(_binding, "{}_neg_prompt".format(tabname))
-
                 ],
                 outputs=[
                     cloud_inference_model_dropdown,
-                    cloud_inference_lora_dropdown,
                     getattr(_binding, "{}_prompt".format(tabname)),
                     getattr(_binding, "{}_neg_prompt".format(tabname))
-                ])
+                ]
+            )
+            # dummy_component = gr.Label(visible=False)
+            # hide_button_favorite.click(
+            #     fn=_binding.update_model_favorite,
+            #     _js='''function(){ name = desciredCloudInferenceFavoriteModelName; desciredCloudInferenceFavoriteModelName = ""; return [name]; }''',
+            #     inputs=[dummy_component],
+            #     outputs=[
+            #         model_checkpoint_browser_dialog_html,
+            #         model_lora_browser_dialog_html,
+            #         model_embedding_browser_dialog_html,
+            #     ],
+            # )
 
+            hide_button_change_lora.click(
+                fn=lambda x, y: _binding.update_selected_lora(x, y),
+                _js="function(a, b){ a.includes(desiredCloudInferenceLoraName) || a.push(desiredCloudInferenceLoraName); desiredCloudInferenceLoraName = ''; return [a, b]; }",
+                inputs=[
+                    cloud_inference_lora_dropdown,
+                    getattr(_binding, "{}_prompt".format(tabname))
+                ],
+                outputs=getattr(_binding, "{}_prompt".format(tabname)),
+            )
             # auto fill prompt after select lora
             cloud_inference_lora_dropdown.select(
                 fn=lambda x, y: _binding.update_selected_lora(x, y),
@@ -281,23 +381,72 @@ class CloudInferenceScript(scripts.Script):
                     cloud_inference_lora_dropdown,
                     getattr(_binding, "{}_prompt".format(tabname))
                 ],
-
                 outputs=getattr(_binding, "{}_prompt".format(tabname)),
             )
 
-            def _model_refresh():
-                api.get_instance().refresh_models()
-                _binding.remote_models = api.get_instance().list_models()
-                _binding.update_models()
+            hide_button_change_embedding.click(
+                fn=lambda x, y: _binding.update_selected_embedding(x, y),
+                _js="function(a, b){ a.includes(desiredCloudInferenceEmbeddingName) || a.push(desiredCloudInferenceEmbeddingName); desiredCloudInferenceEmbeddingName = ''; return [a, b]; }",
+                inputs=[
+                    cloud_inference_embedding_dropdown,
+                    getattr(_binding, "{}_neg_prompt".format(tabname))
+                ],
+                outputs=getattr(_binding, "{}_neg_prompt".format(tabname)),
+            )
+            # embeddings
+            cloud_inference_embedding_dropdown.select(
+                fn=lambda x, y: _binding.update_selected_embedding(x, y),
+                inputs=[
+                    cloud_inference_embedding_dropdown,
+                    getattr(_binding, "{}_neg_prompt".format(tabname))
+                ],
+                outputs=[
+                    getattr(_binding, "{}_neg_prompt".format(tabname)),
+                ]
+            )
 
-                return gr.update(choices=[_.alias for _ in _binding.remote_model_checkpoints]), gr.update(choices=[_.alias for _ in _binding.remote_model_loras]), gr.update(choices=["Automatic", "None"] + [_.name for _ in _binding.remote_model_vaes])
+            cloud_inference_model_dropdown.select(
+                fn=_binding.on_selected_model,
+                inputs=[
+                    cloud_inference_model_dropdown,
+                    cloud_inference_lora_dropdown,
+                    cloud_inference_embedding_dropdown,
+                    cloud_inference_suggest_prompts_checkbox,
+                    getattr(_binding, "{}_prompt".format(tabname)),
+                    getattr(_binding, "{}_neg_prompt".format(tabname))
+                ],
+                outputs=[
+                    cloud_inference_model_dropdown,
+                    getattr(_binding, "{}_prompt".format(tabname)),
+                    getattr(_binding, "{}_neg_prompt".format(tabname))
+                ])
+
+            def _model_refresh(tab):
+                def wrapper():
+                    api.get_instance().refresh_models()
+                    _binding.remote_models = api.get_instance().list_models()
+                    _binding.update_models()
+
+                    return gr.update(choices=[_.alias for _ in _binding.remote_model_checkpoints]), \
+                    gr.update(choices=[_.alias for _ in _binding.remote_model_loras]), \
+                    gr.update(choices=["Automatic", "None"] + [_.name for _ in _binding.remote_model_vaes]), \
+                    gr.update(choices=[_.alias for _ in _binding.remote_model_embeddings]), \
+                    gr.update(value=build_model_browser_html_for_checkpoint(tab, _binding.remote_model_checkpoints)), \
+                    gr.update(value=build_model_browser_html_for_loras(tab, _binding.remote_model_loras)), \
+                    gr.update(value=build_model_browser_html_for_embeddings(tab, _binding.remote_model_embeddings))
+                return wrapper
 
             refresh_button.click(
-                fn=_model_refresh,
+                fn=_model_refresh(tabname),
                 inputs=[],
                 outputs=[cloud_inference_model_dropdown,
                          cloud_inference_lora_dropdown,
-                         cloud_inference_vae_dropdown
+                         cloud_inference_embedding_dropdown,
+                         cloud_inference_vae_dropdown,
+
+                         model_checkpoint_browser_dialog_html,
+                         model_lora_browser_dialog_html,
+                         model_embedding_browser_dialog_html,
                          ])
 
         return [cloud_inference_checkbox, cloud_inference_model_dropdown, cloud_inference_vae_dropdown]
@@ -443,6 +592,124 @@ def on_after_component_callback(component, **_kwargs):
         _binding.initialized = True
 
 
+def build_model_browser_html_for_checkpoint(tab, checkpoints):
+    column_html = ""
+    column_size = 5
+    column_items = [[] for _ in range(column_size)]
+    tag_counter = Counter()
+    kind = "checkpoint"
+    for i, model in enumerate(checkpoints):
+        trimed_tags = [_.replace(" ", "_") for _ in model.tags]
+        tag_counter.update(trimed_tags)
+        if model.preview_url is None or not model.preview_url.startswith("http"):
+            model.preview_url = "https://via.placeholder.com/512x512.png?text=Preview+Not+Available"
+        model_html = f"""<div class="image-item" data-kind="{kind}" data-tags="{" ".join(trimed_tags)}" data-search-terms="{" ".join(model.search_terms)}">
+          <img src="{model.preview_url}" loading="lazy">
+          <div class="title-container">
+            <div class="title" style="color: var(--checkbox-label-text-color)" data-alias="{model.alias}">{model.name.rsplit(".", 1)[0]}</div>
+          </div>
+          <div class="overlay">
+            <div class="buttons">
+            </div>
+              <button id="select-button">Select</button>
+          </div>
+        </div>"""
+        column_index = i % column_size
+        column_items[column_index].append(model_html)
+
+    for i in range(column_size):
+        column_image_items_html = ""
+        for item in column_items[i]:
+            column_image_items_html += item
+        column_html += """<div class="column">{}</div>""".format(column_image_items_html)
+
+    tag_html = f"""<div class="filter-buttons">
+                <button class="btn filter-btn" data-tab="{tab}" data-kind="{kind}" data-tag="all">ALL</button>
+                """
+    tag_html += """{}</div>"""
+    tag_html = tag_html.format("\n".join([f"""<button class="btn filter-btn" data-tab="{tab}" data-kind="{kind}" data-tag="{_[0]}">{_[0].upper()}</button>""" for _ in tag_counter.most_common()]))
+
+    return f"""<h1 class="heading-text" id="{kind}-browser">{kind.upper()} Browser</h1>{tag_html}
+            <div class="search-bar"><input type="text" id="{tab}-{kind}-filter-search-input" class="filter-search-input" style="color: var(--checkbox-label-text-color); background-color: transparent" placeholder="Search models..."></div>
+            <div class="image-gallery">{column_html}</div>"""
+
+
+def build_model_browser_html_for_loras(tab, loras):
+    column_html = ""
+    column_size = 5
+    column_items = [[] for _ in range(column_size)]
+    tag_counter = Counter()
+    kind = "lora"
+    for i, model in enumerate(loras):
+        trimed_tags = [_.replace(" ", "_") for _ in model.tags]
+        tag_counter.update(trimed_tags)
+        model_html = f"""<div class="image-item" data-kind="{kind}" data-tags="{" ".join(trimed_tags)}" data-search-terms="{" ".join(model.search_terms)}">
+          <img src="{model.preview_url}" loading="lazy">
+          <div class="title-container">
+            <div class="title" style="color: var(--checkbox-label-text-color); background-color: transparent" data-alias="{model.alias}">{model.name.rsplit(".", 1)[0]}</div>
+          </div>
+          <div class="overlay">
+            <div class="buttons">
+            </div>
+              <button id="select-button">Select</button>
+          </div>
+        </div>"""
+        column_index = i % column_size
+        column_items[column_index].append(model_html)
+
+    for i in range(column_size):
+        column_image_items_html = ""
+        for item in column_items[i]:
+            column_image_items_html += item
+        column_html += """<div class="column">{}</div>""".format(column_image_items_html)
+
+    tag_html = f"""<div class="filter-buttons">
+                <button class="btn filter-btn" data-tab="{tab}" data-kind="{kind}" data-tag="all">ALL</button>
+                """
+    tag_html += """{}</div>"""
+    tag_html = tag_html.format("\n".join([f"""<button class="btn filter-btn" data-tab="{tab}" data-kind="{kind}" data-tag="{_[0]}">{_[0].upper()}</button>""" for _ in tag_counter.most_common()]))
+
+    return f"""<h1 class="heading-text" id="{kind}-browser">{kind.upper()} Browser</h1>{tag_html}<div class="search-bar"><input type="text" id="{tab}-{kind}-filter-search-input" class="filter-search-input" style="color: var(--checkbox-label-text-color); background-color: transparent" placeholder="Search models..."></div><div class="image-gallery">{column_html}</div>"""
+
+
+def build_model_browser_html_for_embeddings(tab, embeddings):
+    column_html = ""
+    column_size = 5
+    column_items = [[] for _ in range(column_size)]
+    tag_counter = Counter()
+    kind = "embedding"
+    for i, model in enumerate(embeddings):
+        trimed_tags = [_.replace(" ", "_") for _ in model.tags]
+        tag_counter.update(trimed_tags)
+        model_html = f"""<div class="image-item" data-kind="{kind}" data-tags="{" ".join(trimed_tags)}" data-search-terms="{" ".join(model.search_terms)}">
+          <img src="{model.preview_url}" loading="lazy">
+          <div class="title-container">
+            <div class="title" style="color: var(--checkbox-label-text-color)" data-alias="{model.alias}">{model.name.rsplit(".", 1)[0]}</div>
+          </div>
+          <div class="overlay">
+            <div class="buttons">
+            </div>
+              <button id="select-button">Select</button>
+          </div>
+        </div>"""
+        column_index = i % column_size
+        column_items[column_index].append(model_html)
+
+    for i in range(column_size):
+        column_image_items_html = ""
+        for item in column_items[i]:
+            column_image_items_html += item
+        column_html += """<div class="column">{}</div>""".format(column_image_items_html)
+
+    tag_html = f"""<div class="filter-buttons">
+                <button class="btn filter-btn" data-tab="{tab}" data-kind="{kind}" data-tag="all">ALL</button>
+                """
+    tag_html += """{}</div>"""
+    tag_html = tag_html.format("\n".join([f"""<button class="btn filter-btn" data-tab="{tab}" data-kind="{kind}" data-tag="{_[0]}">{_[0].upper()}</button>""" for _ in tag_counter.most_common()]))
+
+    return f"""<h1 class="heading-text" id="{kind}-browser">{kind.upper()} Browser</h1>{tag_html}<div class="search-bar"><input type="text" id="{tab}-{kind}-filter-search-input" class="filter-search-input" style="color: var(--checkbox-label-text-color)" placeholder="Search models..."></div><div class="image-gallery">{column_html}</div>"""
+
+
 def sync_two_component(a, b, event_name):
     def mirror(a, b):
         if a != b:
@@ -457,8 +724,8 @@ def sync_cloud_model(a, b):
         if a != b:
             b = a
         return a, b
-    getattr(a, "select")(fn=mirror, inputs=[a, b], outputs=[a, b])
-    getattr(b, "select")(fn=mirror, inputs=[b, a], outputs=[b, a])
+    getattr(a, "change")(fn=mirror, inputs=[a, b], outputs=[a, b])
+    getattr(b, "change")(fn=mirror, inputs=[b, a], outputs=[b, a])
 
 
 def on_cloud_inference_checkbox_change_without_controlnet(txt2img_checkbox,
