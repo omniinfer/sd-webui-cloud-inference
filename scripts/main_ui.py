@@ -136,7 +136,7 @@ class DataBinding:
         prompt = prompt
         add_lora_prompts = []
 
-        prompt_split = [_.strip() for _ in prompt.split(',')]
+        prompt_split = [_.strip() for _ in prompt.split(',') if _.strip() != ""]
 
         # add
         for lora_name in lora_names:
@@ -164,7 +164,7 @@ class DataBinding:
         neg_prompt = neg_prompt
         add_embedding_prompts = []
 
-        neg_prompt_split = [_.strip() for _ in neg_prompt.split(',')]
+        neg_prompt_split = [_.strip() for _ in neg_prompt.split(',') if _.strip() != ""]
 
         # add
         for embedding_name in embedding_names:
@@ -172,7 +172,7 @@ class DataBinding:
                 add_embedding_prompts.append(embedding_name)
         # delete
         for prompt_item in neg_prompt_split:
-            if embedding_name not in embedding_names:
+            if prompt_item in embedding_names:
                 neg_prompt_split.remove(prompt_item)
 
         neg_prompt_split.extend(add_embedding_prompts)
