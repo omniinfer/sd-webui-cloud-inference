@@ -97,11 +97,10 @@ class StableDiffusionModel(JSONe):
         if len(self.tags) > 0:
             n = "[{}] ".format(",".join(self.tags))
         return n + os.path.splitext(self.name)[0]
-    
+
     def add_user_tag(self, tag):
         if tag not in self.user_tags:
             self.user_tags.append(tag)
-
 
 
 # class StableDiffusionModelExample(object):
@@ -266,11 +265,10 @@ class OmniinferAPI(BaseAPI, UpscaleAPI):
             else:
                 save_kwargs = {}
 
-            buffered = io.BytesIO()
-            i.save(buffered, format=live_previews_image_format, **save_kwargs)
-            base64_image = base64.b64encode(
-                buffered.getvalue()).decode('ascii')
-            images_base64.append(base64_image)
+            with io.BytesIO() as buffered:
+                i.save(buffered, format=live_previews_image_format, **save_kwargs)
+                base64_image = base64.b64encode(buffered.getvalue()).decode('ascii')
+                images_base64.append(base64_image)
 
         def _req(p: processing.StableDiffusionProcessingImg2Img, controlnet_units):
             req = Img2ImgRequest(
@@ -302,8 +300,16 @@ class OmniinferAPI(BaseAPI, UpscaleAPI):
             if 'sd_vae' in p._cloud_inference_settings:
                 req.sd_vae = p._cloud_inference_settings['sd_vae']
 
+            if hasattr(p, 'refiner_checkpoint') and p.refiner_checkpoint is not None and p.refiner_checkpoint != "None":
+                req.sd_refiner = Refiner(
+                    checkpoint=p.refiner_checkpoint,
+                    switch_at=p.refiner_switch_at,
+                )
+
             if len(controlnet_units) > 0:
                 req.controlnet_units = controlnet_units
+                if opts.data.get("control_net_no_detectmap", False):
+                    req.controlnet_no_detectmap = True
 
             res = self._client.sync_img2img(req, download_images=False, callback=self._update_state)
             return res.data.imgs
@@ -352,6 +358,14 @@ class OmniinferAPI(BaseAPI, UpscaleAPI):
 
             if len(controlnet_units) > 0:
                 req.controlnet_units = controlnet_units
+                if opts.data.get("control_net_no_detectmap", False):
+                    req.controlnet_no_detectmap = True
+
+            if hasattr(p, 'refiner_checkpoint') and p.refiner_checkpoint is not None and p.refiner_checkpoint != "None":
+                req.sd_refiner = Refiner(
+                    checkpoint=p.refiner_checkpoint,
+                    switch_at=p.refiner_switch_at,
+                )
 
             res = self._client.sync_txt2img(req, download_images=False, callback=self._update_state)
             if res.data.status != ProgressResponseStatusCode.SUCCESSFUL:
@@ -477,7 +491,7 @@ class OmniinferAPI(BaseAPI, UpscaleAPI):
                 merged_models[model.name].user_tags = origin_models[model.name].user_tags
             else:
                 merged_models[model.name] = model
-            
+
         self._models = [v for k, v in merged_models.items()]
         self.update_models_to_config(self._models)
         return self._models
@@ -668,7 +682,8 @@ def retrieve_images(img_urls):
         while attempts > 0:
             try:
                 response = requests.get(img_url, timeout=2)
-                return Image.open(io.BytesIO(response.content))
+                with io.BytesIO(response.content) as fp:
+                    return Image.open(fp).copy()
             except Exception:
                 print("[cloud-inference] failed to download image, retrying...")
             attempts -= 1
