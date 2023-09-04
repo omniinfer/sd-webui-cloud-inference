@@ -23,9 +23,11 @@ This extension enables faster image generation without the need for expensive GP
 | -------------------------- | ------- | ----------- |
 | txt2img                    | ✅       |             |
 | txt2img_hires.fix          | ✅       |             |
+| txt2img_sdxl_refiner       | ✅       |             |
 | txt2img_controlnet         | ✅       |             |
 | img2img                    | ✅       |             |
 | img2img_inpaint            | ✅       |             |
+| img2img_sdxl_refiner       | ✅       |             |
 | img2img_controlnet         | ✅       |             |
 | extras upscale             | ✅       |             |
 | vae model                  | ✅       |             |
@@ -104,3 +106,26 @@ or you can use the VAE feature with X/Y/Z
 
 ![Screenshot 2023-08-09 at 20 16 18-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/1e606dd5-51aa-4eea-baba-f78849104591)
 
+
+## 11. Advanced - Model Browser
+
+![Screenshot 2023-08-27 at 17 03 48-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/ad586862-ac5f-4689-a166-d1d7d654a9f1)
+
+
+## 12. Advanced - Tiny Model
+
+The AUTOMATIC1111 webui loads the model on startup. However, on low-memory computers like the MacBook Air, the performance is suboptimal. To address this, we have developed a stripped-down minimal-size model. You can utilize the following commands to enable it.
+
+its will reduce memory from 4.8G -> 739MB 
+
+1. Download tiny model and config to model config.
+```
+wget -O ./models/Stable-diffusion/tiny.yaml https://github.com/omniinfer/sd-webui-cloud-inference/releases/download/tiny-model/tiny.yaml
+wget -O ./models/Stable-diffusion/tiny.safetensors https://github.com/omniinfer/sd-webui-cloud-inference/releases/download/tiny-model/tiny.safetensors
+```
+2. start webui with tiny model
+`--ckpt=/stable-diffusion-webui/models/Stable-diffusion/tiny.safetensors`
+
+## 13. Advanced - SDXL Refiner
+
+![Screenshot 2023-09-04 at 13 45 24-mh](https://github.com/omniinfer/sd-webui-cloud-inference/assets/16937838/f8537240-c2a0-4ed3-84c0-70dd23764add)
