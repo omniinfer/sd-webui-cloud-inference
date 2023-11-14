@@ -278,7 +278,7 @@ class OmniinferAPI(BaseAPI, UpscaleAPI):
                 mask=image_to_base64(p.image_mask) if p.image_mask else None,
                 resize_mode=p.resize_mode,
                 denoising_strength=p.denoising_strength,
-                cfg_scale=p.image_cfg_scale,
+                cfg_scale=p.cfg_scale,
                 mask_blur=p.mask_blur_x,
                 inpaint_full_res=bool2int(p.inpaint_full_res),
                 inpaint_full_res_padding=p.inpaint_full_res_padding,
@@ -299,6 +299,7 @@ class OmniinferAPI(BaseAPI, UpscaleAPI):
 
             if 'sd_vae' in p._cloud_inference_settings:
                 req.sd_vae = p._cloud_inference_settings['sd_vae']
+
 
             if hasattr(p, 'refiner_checkpoint') and p.refiner_checkpoint is not None and p.refiner_checkpoint != "None":
                 req.sd_refiner = Refiner(
