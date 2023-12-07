@@ -280,6 +280,7 @@ class OmniinferAPI(BaseAPI, UpscaleAPI):
                 denoising_strength=p.denoising_strength,
                 cfg_scale=p.cfg_scale,
                 mask_blur=p.mask_blur_x,
+                inpainting_fill=p.inpainting_fill,
                 inpaint_full_res=bool2int(p.inpaint_full_res),
                 inpaint_full_res_padding=p.inpaint_full_res_padding,
                 initial_noise_multiplier=p.initial_noise_multiplier,
@@ -548,6 +549,11 @@ def get_controlnet_arg(p: processing.StableDiffusionProcessing):
         elif c.resize_mode == "Envelope (Outer Fit)":
             controlnet_arg['resize_code'] = 2
 
+        if 'pixel_perfect' in c.__dict__:
+            if c.pixel_perfect:
+                controlnet_arg['pixel_perfect'] = True
+
+        
         if 'processor_res' in c.__dict__:
             if c.processor_res > 0:
                 controlnet_arg['processor_res'] = c.processor_res
