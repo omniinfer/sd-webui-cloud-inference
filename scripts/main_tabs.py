@@ -17,9 +17,9 @@ def on_ui_tabs():
                     key_textbox = gr.Textbox(
                         value=api.get_instance().__dict__.get('_token')
                         if api.get_instance() is not None else "",
-                        label="Omniinfer Key",
+                        label="Novita.AI Key",
                         type="password",
-                        placeholder="Enter omniinfer key here",
+                        placeholder="Enter novita.ai key here",
                         elem_id="settings_remote_inference_omniinfer_key",
                     )
 

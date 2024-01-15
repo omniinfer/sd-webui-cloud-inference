@@ -1,4 +1,5 @@
 import modules.scripts as scripts
+from modules.scripts import scripts_data
 import gradio as gr
 import os
 
@@ -275,8 +276,8 @@ class CloudInferenceScript(scripts.Script):
             with gr.Row():
                 gr.Dropdown(
                     label="Service Provider",
-                    choices=["Omniinfer"],
-                    value="Omniinfer",
+                    choices=["Novita.AI"],
+                    value="Novita.AI",
                     elem_id="{}_cloud_api_dropdown".format(tabname),
                     scale=1
                 )
@@ -467,9 +468,16 @@ if _binding is None:
     if shared.opts.data.get("cloud_inference_default_enabled", False):
         _binding.remote_inference_enabled = True
 
-    if os.path.isdir(os.path.join(paths_internal.extensions_dir, "sd-webui-controlnet")) and 'sd-webui-controlnet' not in shared.opts.data.get('disabled_extensions', []):
-        _binding.ext_controlnet_installed = True
+    controlnet_installed = False
+    controlnet_module_name = 'sd-webui-controlnet'
+    for script in scripts_data:
+        if script.module.__name__ == 'controlnet.py':
+            controlnet_installed = True
+            controlnet_module_name = os.path.split(script.basedir)[-1]
+            break
 
+    if controlnet_installed and controlnet_module_name not in shared.opts.data.get('disabled_extensions', []):
+        _binding.ext_controlnet_installed = True
     try:
         import modules.processing_scripts.refiner
         _binding.bultin_refiner_supported = True

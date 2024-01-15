@@ -53,9 +53,9 @@ class _HijackManager(object):
     def hijack_on_app_started(self, *args, **kwargs):
         if self._hijacked_on_app_started:
             return
-        
+
         self.hijack_one('extensions.sd-webui-controlnet.scripts.global_state.update_cn_models', self._hijack_update_cn_models)
-        self._hijack_update_cn_models() # update once
+        self._hijack_update_cn_models()  # update once
 
         self._hijacked_on_app_started = True
 
