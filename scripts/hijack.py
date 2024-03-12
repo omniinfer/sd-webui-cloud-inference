@@ -3,7 +3,13 @@ import os
 import sys
 import importlib
 
-from modules import images, script_callbacks, errors, processing, ui, shared, scripts_postprocessing, generation_parameters_copypaste, ui_common
+from modules import images, script_callbacks, errors, processing, ui, shared, scripts_postprocessing, ui_common
+try:
+    from modules import generation_parameters_copypaste
+except ImportError:
+    pass
+    from modules import infotext_utils as generation_parameters_copypaste
+
 from modules.processing import Processed, StableDiffusionProcessingImg2Img, StableDiffusionProcessingTxt2Img, StableDiffusionProcessing
 from modules.shared import opts, state, prompt_styles
 from extension import api
@@ -53,9 +59,9 @@ class _HijackManager(object):
     def hijack_on_app_started(self, *args, **kwargs):
         if self._hijacked_on_app_started:
             return
-        
+
         self.hijack_one('extensions.sd-webui-controlnet.scripts.global_state.update_cn_models', self._hijack_update_cn_models)
-        self._hijack_update_cn_models() # update once
+        self._hijack_update_cn_models()  # update once
 
         self._hijacked_on_app_started = True
 
@@ -444,7 +450,7 @@ def create_infotext(p,
 
     generation_params_text = ", ".join([
         k if k == v else
-        f'{k}: {processing.generation_parameters_copypaste.quote(v)}'
+        f'{k}: {generation_parameters_copypaste.quote(v)}'
         for k, v in generation_params.items() if v is not None
     ])
 
